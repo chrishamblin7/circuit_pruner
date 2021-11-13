@@ -124,9 +124,13 @@ if __name__ == '__main__':
 
 	pruned_target_activations = {}
 
+	if structure == 'filters':
+		reset_masks_in_net(pruned_model)
+		apply_filter_mask(pruned_model,mask) #different than masking weights, because it also masks biases
+
 
 	for it in range(iters):
-		clear_feature_targets_from_net(pruned_model)
+		#clear_feature_targets_from_net(pruned_model)
 
 		# Grab a single batch from the training dataset
 		inputs, targets = next(iter_dataloader)
@@ -208,9 +212,9 @@ if __name__ == '__main__':
 				'config':args.config
 					}
 
-	if not os.path.exists('circuit_masks/'+params.name):
-		os,mkdir('circuit_masks/'+params.name)
-	torch.save(save_object,'circuit_masks/%s/%s_%s_unit%s_FORCE_%s_%s_%s.pt'%(params.name,params.name,layer,str(unit),str(ratio),str(T),str(time.time())))
+	if not os.path.exists('circuit_masks/'+params.name+'/force'):
+		os.mkdir('circuit_masks/'+params.name+'/force')
+	torch.save(save_object,'circuit_masks/%s/force/%s_%s_unit%s_FORCE_%s_%s_%s.pt'%(params.name,params.name,layer,str(unit),str(ratio),str(T),str(time.time())))
 
 
 	print(time.time() - start)

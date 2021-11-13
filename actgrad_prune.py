@@ -1,9 +1,10 @@
 from circuit_pruner.force import *
+from circuit_pruner.custom_exceptions import TargetReached
 import time
 import os
 from circuit_pruner.utils import update_sys_path
 
-
+'''
 class ModelBreak(Exception):
 	"""Base class for other exceptions"""
 	pass
@@ -11,7 +12,7 @@ class ModelBreak(Exception):
 class TargetReached(ModelBreak):
 	"""Raised when the output target for a subgraph is reached, so the model doesnt neeed to be run forward any farther"""
 	pass   
-
+'''
 
 
 ##DATA LOADER###
@@ -36,8 +37,7 @@ def get_args():
 	parser.add_argument('--unit', type=int,help='numeral for unit in layer of target feature')
 	parser.add_argument('--batch-size', type=int, default=7,
 						help='number of batches for dataloader')
-	parser.add_argument('--ratio', type=float, default=.05,
-						help='ratio of params before and after pruning')
+	parser.add_argument('--ratio', action='append', help='<Required> Set flag', required=True)
 	parser.add_argument('--rank-field', type=str, default='image',
 						help='what activations in the target feature do we care about (image, min, or max)')              
 	parser.add_argument('--get_accuracies', action='store_true', default=False, help='store activations for feature of original model and subgraph')
@@ -65,10 +65,11 @@ if __name__ == '__main__':
 
 	layer = args.layer
 	unit = args.unit
-	ratio = args.ratio
+	ratios = args.ratio
 	device= args.device
 	rank_field = args.rank_field
 	structure = args.structure
+
 
 	if args.data_path is None:
 		data_path = params.data_path
@@ -119,7 +120,7 @@ if __name__ == '__main__':
 		#Run model forward until all targets reached
 		try:
 			outputs = dissected_model(inputs)
-		except TargetReached:
+		except:
 			pass
 		
 	#fetch ranks
@@ -148,6 +149,7 @@ if __name__ == '__main__':
 
 	setup_net_for_circuit_prune(pruned_model, feature_targets=feature_target, rank_field = rank_field,save_target_activations=True)
 
+	pruned_model = pruned_model.to(device)
 
 	#GET ORIGINAL ACTIVATIONS
 
@@ -161,7 +163,7 @@ if __name__ == '__main__':
 
 
 	for it in range(iters):
-		clear_feature_targets_from_net(pruned_model)
+		#clear_feature_targets_from_net(pruned_model)
 
 		# Grab a single batch from the training dataset
 		inputs, targets = next(iter_dataloader)
@@ -172,8 +174,8 @@ if __name__ == '__main__':
 		#Run model forward until all targets reached
 		try:
 			outputs = pruned_model.forward(inputs)
-		#except TargetReached:
 		except:
+			#except:
 			pass
 
 
@@ -195,119 +197,136 @@ if __name__ == '__main__':
 	else:
 		structures = [structure]
 
+	for ratio in ratios:
+		ratio = float(ratio)
 
-	for structure in structures:
+		for structure in structures:
 
 
-		#get total params given feature target might exclude some of network
-		total_params = 0
+			#get total params given feature target might exclude some of network
+			total_params = 0
 
-		for l in pruned_model.modules():
-			if isinstance(l, nn.Conv2d):
-				if not l.last_layer:  #all params potentially important
-					if structure == 'kernels':
-						total_params += int(l.weight.shape[0]*l.weight.shape[1])
-					else:
-						total_params += int(l.weight.shape[0])
+			for l in pruned_model.modules():
+				if isinstance(l, nn.Conv2d):
+					if not l.last_layer:  #all params potentially important
+						if structure == 'kernels':
+							total_params += int(l.weight.shape[0]*l.weight.shape[1])
+						else:
+							total_params += int(l.weight.shape[0])
+							
+					else: #only weights leading into feature targets are important
+						if structure == 'kernels':
+							total_params += int(len(l.feature_targets_indices)*l.weight.shape[1])
+						else:
+							total_params += len(l.feature_targets_indices)
 						
-				else: #only weights leading into feature targets are important
-					if structure == 'kernels':
-						total_params += int(len(l.feature_targets_indices)*l.weight.shape[1])
-					else:
-						total_params += len(l.feature_targets_indices)
-					
-					break
+						break
 
-		num_params_to_keep = ceil(ratio*total_params)
+			num_params_to_keep = ceil(ratio*total_params)
+			print(num_params_to_keep)
 
+			
+			for ranktype in ['act','actxgrad']:
+				#generate weight mask from layer_ranks
+				rank_list = []
 
-		
-		for ranktype in ['act','actxgrad']:
-			#generate weight mask from layer_ranks
-			rank_list = []
+				struct_dict = {'kernels':'edges','filters':'nodes'}
 
-			struct_dict = {'kernels':'edges','filters':'nodes'}
-
-			for l in layer_ranks[struct_dict[structure]][ranktype]:
-				rank_list.append(torch.tensor(l[1]))
+				for l in layer_ranks[struct_dict[structure]][ranktype]:
+					rank_list.append(torch.tensor(l[1]))
 
 
 
-			all_scores = torch.cat([torch.flatten(x) for x in rank_list])
-			norm_factor = torch.sum(all_scores)
-			all_scores.div_(norm_factor)
+				all_scores = torch.cat([torch.flatten(x) for x in rank_list])
+				norm_factor = torch.sum(all_scores)
+				all_scores.div_(norm_factor)
 
-			threshold, _ = torch.topk(all_scores, num_params_to_keep, sorted=True)
-			acceptable_score = threshold[-1]
+				threshold, _ = torch.topk(all_scores, num_params_to_keep, sorted=True)
+				acceptable_score = threshold[-1]
 
-			mask = []
+				mask = []
 
-			for g in rank_list:
-				mask.append(((g / norm_factor) >= acceptable_score).float())
+				
 
-			###GET ACTIVATIONS FROM PRUNED MODEL
-			#get feature outputs from pruned model
-			apply_mask(pruned_model,mask) 
+				for g in rank_list:
+					mask.append(((g / norm_factor) >= acceptable_score).float())
 
 
-			save_target_activations_in_net(pruned_model,save=True)
+				if structure is not 'weights':
+					expanded_mask = expand_structured_mask(mask,pruned_model) #this weight mask will get applied to the network on the next iteration
+				else:
+					expanded_mask = mask
 
-			iter_dataloader = iter(dataloader)
-			iters = len(iter_dataloader)
+				for l in expanded_mask:
+					l = l.to(device)
 
-
-			print(iters)
-
-			pruned_target_activations = {}
-
-
-			for it in range(iters):
-				clear_feature_targets_from_net(pruned_model)
-
-				# Grab a single batch from the training dataset
-				inputs, targets = next(iter_dataloader)
-				inputs = inputs.to(device)
-
-				pruned_model.zero_grad()
-
-				#Run model forward until all targets reached
-				try:
-					outputs = pruned_model.forward(inputs)
-				#except TargetReached:
-				except:
-					pass
-
-				activations = get_saved_target_activations_from_net(pruned_model)
-				for l in activations:
-					activations[l] = activations[l].to('cpu')
-					if l not in pruned_target_activations.keys():
-						pruned_target_activations[l] = activations[l]
-					else:
-						pruned_target_activations[l] = torch.cat((pruned_target_activations[l],activations[l]),dim=0)
+				#import pdb; pdb.set_trace()
+				###GET ACTIVATIONS FROM PRUNED MODEL
+				#get feature outputs from pruned model
+				if structure == 'filters':
+					reset_masks_in_net(pruned_model)
+					apply_filter_mask(pruned_model,mask) #different than masking weights, because it also masks biases
+				else:
+					apply_mask(pruned_model,expanded_mask) 
 
 
 
+				save_target_activations_in_net(pruned_model,save=True)
 
-			#save everything
-			for i in range(len(mask)):
-				mask[i] = mask[i].to('cpu')
-			save_object = {'mask':mask,
-						'full_target_activations':orig_target_activations,
-						'pruned_target_activations':pruned_target_activations,
-						'keep_ratio':ratio,
-						'method':ranktype,
-						'layer':layer,
-						'unit':unit,
-						'rank_field':rank_field,
-						'structure':structure,
-						'batch_size':batch_size,
-						'data_path':data_path,
-						'config':args.config
-							}
+				iter_dataloader = iter(dataloader)
+				iters = len(iter_dataloader)
 
-			if not os.path.exists('circuit_masks/'+params.name):
-				os,mkdir('circuit_masks/'+params.name)
-			torch.save(save_object,'circuit_masks/%s/%s_%s_unit%s_%s_%s_%s.pt'%(params.name,params.name,layer,str(unit),ranktype,str(ratio),str(time.time())))
+
+				pruned_target_activations = {}
+
+
+				for it in range(iters):
+					#clear_feature_targets_from_net(pruned_model)
+
+					# Grab a single batch from the training dataset
+					inputs, targets = next(iter_dataloader)
+					inputs = inputs.to(device)
+
+					pruned_model.zero_grad()
+
+					#Run model forward until all targets reached
+					try:
+						outputs = pruned_model(inputs)
+					#except TargetReached:
+					except:
+						pass
+
+					activations = get_saved_target_activations_from_net(pruned_model)
+					for l in activations:
+						activations[l] = activations[l].to('cpu')
+						if l not in pruned_target_activations.keys():
+							pruned_target_activations[l] = activations[l]
+						else:
+							pruned_target_activations[l] = torch.cat((pruned_target_activations[l],activations[l]),dim=0)
+
+
+
+
+				#save everything
+				for i in range(len(mask)):
+					mask[i] = mask[i].to('cpu')
+				save_object = {'mask':mask,
+							'full_target_activations':orig_target_activations,
+							'pruned_target_activations':pruned_target_activations,
+							'keep_ratio':ratio,
+							'method':ranktype,
+							'layer':layer,
+							'unit':unit,
+							'rank_field':rank_field,
+							'structure':structure,
+							'batch_size':batch_size,
+							'data_path':data_path,
+							'config':args.config
+								}
+
+				if not os.path.exists('circuit_masks/'+params.name+'/actgrad'):
+					os.mkdir('circuit_masks/'+params.name+'/actgrad')
+				torch.save(save_object,'circuit_masks/%s/actgrad/%s_%s_unit%s_%s_%s_%s.pt'%(params.name,params.name,layer,str(unit),ranktype,str(ratio),str(time.time())))
 
 
 	print(time.time() - start)

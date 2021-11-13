@@ -165,8 +165,8 @@ class dissected_Conv2d(torch.nn.Module):       #2d conv Module class that has pr
 	def compute_node_rank(self,grad):
 		activation = self.postbias_out
 		activation_relu = F.relu(activation)
-		taylor = activation_relu * torch.abs(grad) 
-		rank_key  = {'act':activation_relu,'grad':torch.abs(grad),'actxgrad':taylor}
+		taylor = torch.abs(activation * grad) 
+		rank_key  = {'act':torch.abs(activation),'grad':torch.abs(grad),'actxgrad':taylor}
 		for key in rank_key:
 			if self.postbias_ranks[key] is None: #initialize at 0
 				self.postbias_ranks[key] = torch.FloatTensor(activation.size(1)).zero_().to(self.device)

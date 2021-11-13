@@ -1,12 +1,12 @@
 from subprocess import call
 
 config = 'configs/alexnet_sparse_config.py'
-layers = ['features_6','features_8','features_10']
+layers = ['features_3','features_6','features_8','features_10']
 data_path = 'image_data/imagenet_2/'
-Ts = [1,2,8]
-units = range(20)
-ratios = [.2,.005,.001]
-device = 'cuda:1'
+units = [19]
+Ts = [1,8]
+ratios = [.5,.2,.1,.05,.01,.005,.001]
+device = 'cuda:0'
 
 for layer in layers:
     for unit in units:
