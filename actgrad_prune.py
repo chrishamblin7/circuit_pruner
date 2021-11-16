@@ -1,3 +1,7 @@
+#given a feature a a ratio this returns a mask and meta data
+
+
+
 from circuit_pruner.force import *
 from circuit_pruner.custom_exceptions import TargetReached
 import time
@@ -198,6 +202,7 @@ if __name__ == '__main__':
 		structures = [structure]
 
 	for ratio in ratios:
+		import pdb;pdb.set_trace()
 		ratio = float(ratio)
 
 		for structure in structures:
@@ -208,13 +213,13 @@ if __name__ == '__main__':
 
 			for l in pruned_model.modules():
 				if isinstance(l, nn.Conv2d):
-					if not l.last_layer:  #all params potentially important
+					if not l.last_layer:  #all params potentially relevant
 						if structure == 'kernels':
 							total_params += int(l.weight.shape[0]*l.weight.shape[1])
 						else:
 							total_params += int(l.weight.shape[0])
 							
-					else: #only weights leading into feature targets are important
+					else: #only weights leading into feature targets are relevant
 						if structure == 'kernels':
 							total_params += int(len(l.feature_targets_indices)*l.weight.shape[1])
 						else:
@@ -223,6 +228,7 @@ if __name__ == '__main__':
 						break
 
 			num_params_to_keep = ceil(ratio*total_params)
+			print(total_params)
 			print(num_params_to_keep)
 
 			

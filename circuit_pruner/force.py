@@ -1,7 +1,9 @@
 from collections import OrderedDict
 from circuit_pruner.custom_exceptions import TargetReached
+from copy import deepcopy
 
-def show_model_layer_names(model, getLayerRepr=False):
+
+def show_model_layer_names(model, getLayerRepr=False,printer=True):
 	"""
 	If getLayerRepr is True, return a OrderedDict of layer names, layer representation string pair.
 	If it's False, just return a list of layer names
@@ -32,14 +34,16 @@ def show_model_layer_names(model, getLayerRepr=False):
 				
 	get_layers(model)
 	
-	print('All Layers:\n')
-	for layer in layers:
-		print(layer)
+	if printer:
+		print('All Layers:\n')
+		for layer in layers:
+			print(layer)
 
-	print('\nConvolutional and Linear layers:\n')
-	for layer in conv_linear_layers:
-		print(layer)
+		print('\nConvolutional and Linear layers:\n')
+		for layer in conv_linear_layers:
+			print(layer)
 
+	return layers
 
 
 
@@ -611,6 +615,102 @@ def circuit_SNIP(net, dataloader, feature_targets = None, feature_targets_coeffi
 	return(keep_masks)
 
 	
+
+
+def circuit_snip_rank(net, dataloader, feature_targets = None, feature_targets_coefficients = None, full_dataset = True, device=None, mask=None, criterion= None, setup_net=True,rank_field='image'):
+
+	
+	if device is None:
+		device = 'cuda' if torch.cuda.is_available() else 'cpu'
+  
+
+	#set up cirterion
+	if criterion is None:
+		criterion = torch.nn.CrossEntropyLoss()
+
+
+
+	if setup_net:
+		setup_net_for_circuit_prune(net, feature_targets=feature_targets, rank_field = rank_field)
+		
+
+	
+	#apply current mask
+	count = 0
+	for layer in net.modules():
+		if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear):
+			if mask is not None and count < len(mask): #we have a mask for these weights 
+				layer.weight_mask = nn.Parameter(mask[count])
+			else:
+				layer.weight_mask = nn.Parameter(torch.ones_like(layer.weight))
+			#nn.init.xavier_normal_(layer.weight)
+			layer.weight.requires_grad = False
+			count += 1
+
+	
+
+	
+	#do we iterate through the whole dataset or not
+	iter_dataloader = iter(dataloader)
+	
+	iters = 1
+	if full_dataset:
+		iters = len(iter_dataloader)
+	
+	
+	grads_abs = [] #computed scores
+	
+
+	for it in range(iters):
+		clear_feature_targets_from_net(net)
+		
+		# Grab a single batch from the training dataset
+		inputs, targets = next(iter_dataloader)
+		inputs = inputs.to(device)
+		targets = targets.to(device)
+
+
+
+
+		# Compute gradients (but don't apply them)
+		net.zero_grad()
+		
+		#Run model forward until all targets reached
+		try:
+			outputs = net.forward(inputs)
+		except TargetReached:
+			pass
+		
+		#get proper loss
+		if feature_targets is None:
+			loss = criterion(outputs, targets)
+		else:   #the real target is feature values in the network
+			loss = get_feature_target_from_net(net, feature_targets, feature_targets_coefficients,device=device)
+		
+		loss.backward()
+
+		#get weight-wise scores
+		if grads_abs == []:
+			for layer in net.modules():
+				if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear):
+					grads_abs.append(torch.abs(layer.weight_mask.grad))
+					if layer.last_layer:
+						break
+		else:
+			count = 0
+			for layer in net.modules():
+				if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear):
+					grads_abs[count] += torch.abs(layer.weight_mask.grad)        
+					count += 1
+					if layer.last_layer:
+						break
+	  
+	return(grads_abs)
+
+
+
+
+
 	
 # def apply_prune_mask(net, keep_masks):
 
@@ -907,3 +1007,63 @@ def snip_scores(net,dataloader, feature_targets = None, feature_targets_coeffici
 	return structure_grads_abs
 
 
+
+def mask_from_sparsity(rank_list, k):
+
+	all_scores = torch.cat([torch.flatten(x) for x in rank_list])
+	norm_factor = torch.sum(all_scores)
+	all_scores.div_(norm_factor)
+
+	threshold, _ = torch.topk(all_scores, k, sorted=True)
+	acceptable_score = threshold[-1]
+	cum_sal = torch.sum(threshold)
+
+	mask = []
+
+	for g in rank_list:
+		mask.append(((g / norm_factor) >= acceptable_score).float())
+		
+	return mask,cum_sal
+
+
+
+def kernel_mask_2_effective_kernel_mask(kernel_mask):
+	effective_mask = deepcopy(kernel_mask)
+	for i in range(len(effective_mask)):
+		effective_mask[i] = effective_mask[i].to('cpu')
+
+	#pixel to feature connectivity check
+	prev_filter_mask = None
+	for i in range(len(effective_mask)):
+		if prev_filter_mask is not None:  # if we arent in first layer, we have to eliminate kernels connecting to 'dead' filters from the previous layer
+			effective_mask[i] = prev_filter_mask*effective_mask[i]
+
+		#now we need to get the filter mask for this layer, (masking those filters with no kernels leading in)
+		prev_filter_mask = torch.zeros(effective_mask[i].shape[0])
+		for j in range(effective_mask[i].shape[0]):
+			if not torch.all(torch.eq(effective_mask[i][j],torch.zeros(effective_mask[i].shape[1]))):
+				prev_filter_mask[j] = 1
+
+	#reverse direction feature to pixel connectivity check
+	prev_filter_mask = None
+	for i in reversed(range(len(effective_mask))):
+		if prev_filter_mask is not None:  # if we arent in last layer, we have to eliminate kernels connecting to 'dead' filters from the previous layer
+			effective_mask[i] = torch.transpose(prev_filter_mask*torch.transpose(effective_mask[i],0,1),0,1)
+
+		#now we need to get the filter mask for this layer, (masking those filters with no kernels leading in)
+		prev_filter_mask = torch.zeros(effective_mask[i].shape[1])
+		for j in range(effective_mask[i].shape[1]):
+			if not torch.all(torch.eq(effective_mask[i][:,j],torch.zeros(effective_mask[i].shape[0]))):
+				prev_filter_mask[j] = 1
+
+	orig_sum  = 0
+	for l in kernel_mask:
+		orig_sum += int(torch.sum(l))
+	print('original mask: %s kernels'%str(orig_sum))
+
+	effective_sum  = 0
+	for l in effective_mask:
+		effective_sum += int(torch.sum(l))
+	print('effective mask: %s kernels'%str(effective_sum))
+
+	return effective_mask
