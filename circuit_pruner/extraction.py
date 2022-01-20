@@ -111,7 +111,8 @@ def extract_circuit_with_eff_mask(model,eff_mask):
 
 				for o_i,o in enumerate(out_channels):
 					for i_i,i in enumerate(in_channels):
-						weights[o_i,i_i,:,:] = old_conv.weight[o,i,:,:]
+						if layer_mask[o,i] != 0:
+							weights[o_i,i_i,:,:] = old_conv.weight[o,i,:,:]
 
 				#GENERATE BIAS 
 				if new_conv.bias is not None:

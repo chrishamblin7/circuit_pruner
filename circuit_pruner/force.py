@@ -482,7 +482,7 @@ def make_net_mask_only(net):
 			layer.feature_targets_indices = None
 
 	
-def circuit_SNIP(net, dataloader, feature_targets = None, feature_targets_coefficients = None, full_dataset = True, keep_ratio=.1, num_params_to_keep=None, device=None, structure='weights', mask=None, criterion= None, setup_net=True,rank_field='image'):
+def circuit_SNIP(net, dataloader, feature_targets = None, feature_targets_coefficients = None, full_dataset = True, keep_ratio=.1, num_params_to_keep=None, device=None, structure='weights', mask=None, criterion= None, setup_net=True,rank_field='image', return_ranks = False):
 	'''
 	if num_params_to_keep is specified, this argument overrides keep_ratio
 	'''
@@ -611,8 +611,10 @@ def circuit_SNIP(net, dataloader, feature_targets = None, feature_targets_coeffi
 
 	#print(torch.sum(torch.cat([torch.flatten(x == 1) for x in keep_masks])))
 
-	
-	return(keep_masks)
+	if not return_ranks:
+		return keep_masks
+	else:
+		return grads_abs,keep_masks
 
 	
 
@@ -764,7 +766,7 @@ def expand_structured_mask(mask,net):
 
 
 
-def circuit_FORCE_pruning(net, dataloader, feature_targets = None,feature_targets_coefficients = None, T=10,full_dataset = True, keep_ratio=.1, num_params_to_keep=None, device=None, structure='weights', rank_field = 'image', mask=None, setup_net=True):    #progressive skeletonization
+def circuit_FORCE_pruning(net, dataloader, feature_targets = None,feature_targets_coefficients = None, T=10,full_dataset = True, keep_ratio=.1, num_params_to_keep=None, device=None, structure='weights', rank_field = 'image', mask=None, setup_net=True, return_ranks = False):    #progressive skeletonization
 
 	
 	assert structure in ('weights','kernels','filters')
@@ -827,14 +829,21 @@ def circuit_FORCE_pruning(net, dataloader, feature_targets = None,feature_target
 		print('%s params'%str(k))
 		
 		#SNIP
-		struct_mask = circuit_SNIP(net, dataloader, num_params_to_keep=k, feature_targets = feature_targets, feature_targets_coefficients = feature_targets_coefficients, structure=structure, mask=mask, full_dataset = full_dataset, device=device,setup_net=False)
+		if not return_ranks:
+			struct_mask = circuit_SNIP(net, dataloader, num_params_to_keep=k, feature_targets = feature_targets, feature_targets_coefficients = feature_targets_coefficients, structure=structure, mask=mask, full_dataset = full_dataset, device=device,setup_net=False)
+		else:
+			grads_abs,struct_mask = circuit_SNIP(net, dataloader, num_params_to_keep=k, feature_targets = feature_targets, feature_targets_coefficients = feature_targets_coefficients, structure=structure, mask=mask, full_dataset = full_dataset, device=device,setup_net=False,return_ranks=True)
 		if structure is not 'weights':
 			mask = expand_structured_mask(struct_mask,net) #this weight mask will get applied to the network on the next iteration
 		else:
 			mask = struct_mask
 	apply_mask(net,mask)
 
-	return struct_mask
+	if not return_ranks:
+		return struct_mask
+	else:
+		return grads_abs,struct_mask
+
 
 
 

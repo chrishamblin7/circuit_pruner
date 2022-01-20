@@ -85,6 +85,9 @@ if __name__ == '__main__':
 
 
 	imageset = data_path.split('/')[-1]
+	if data_path[-1] == '/':
+		imageset = data_path.split('/')[-2]
+
 
 
 	kwargs = {'num_workers': params.num_workers, 'pin_memory': True, 'sampler':None} if 'cuda' in device else {}
@@ -143,9 +146,9 @@ if __name__ == '__main__':
 				'config':args.config
 					}
 
-	if not os.path.exists('circuit_ranks/'+params.name+'/'+imageset+'/actgrad'):
-		os.makedirs('circuit_ranks/'+params.name+'/'+imageset+'/actgrad',exist_ok=True)
-	torch.save(save_object,'circuit_ranks/%s/actgrad/%s_%s:%s_%s.pt'%(params.name,params.name,layer,str(unit),str(time.time())))
+	if not os.path.exists('circuit_ranks/'+params.name+'/'+imageset+'/actxgrad'):
+		os.makedirs('circuit_ranks/'+params.name+'/'+imageset+'/actxgrad',exist_ok=True)
+	torch.save(save_object,'circuit_ranks/%s/%s/actxgrad/%s_%s:%s_%s.pt'%(params.name,imageset,params.name,layer,str(unit),str(time.time())))
 
 
 	print(time.time() - start)

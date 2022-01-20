@@ -48,6 +48,68 @@ def single_image_loader(image_path, transform, label_file_path = None, label_dic
 	return (image,target)
 
 
+class single_image_data(Dataset):
+	''' a bit silly, but a dataloader class for loading a single image'''
+	def __init__(self, file_path, transform, label_file_path = None, label_dict_path = None):
+		
+		
+		self.file_path = file_path
+		self.img_name = file_path.split('/')[-1]
+
+		self.label_list = None
+		self.label_file_path = label_file_path
+		if self.label_file_path is not None:
+			label_file = open(label_file_path,'r')
+			self.label_list = [x.strip() for x in label_file.readlines()]
+			label_file.close()
+
+		self.label_dict_path = label_dict_path
+		self.label_dict = None
+		if self.label_dict_path is not None:
+			self.label_dict = pickle.load(open(label_dict_path,'rb'))
+
+		if not transform:
+			transform = transforms.Compose([transforms.ToTensor()])
+		self.transform = transform
+
+	def __len__(self):
+		return 1
+
+	def get_label_from_name(self,img_name):
+		#check for label dict
+		if self.label_dict is not None:
+			if img_name not in self.label_dict.keys():
+				return torch.tensor(9999999)
+			else:
+				return self.label_dict[img_name]
+		else: #assume its a discrete one-hot label	
+			if self.label_list is None:
+				return torch.tensor(9999999)
+			label_name = None
+			label_num = None
+			for i in range(len(self.label_list)): # see if any label in file name
+				if self.label_list[i] in img_name:
+					if label_name is None:
+						label_name =  self.label_list[i]
+						label_num = i
+					elif len(self.label_list[i]) > len(label_name):
+						label_name = self.label_list[i]
+						label_num = i
+			target = torch.tensor(9999999)
+			if label_num is not None:
+				target = torch.tensor(label_num)
+			return target      
+
+	def __getitem__(self, idx):
+
+		img = Image.open(self.file_path)
+		img = self.transform(img).float()
+		label = self.get_label_from_name(self.img_name)
+		
+		return (img,label)
+
+
+
 
 class rank_image_data(Dataset):
 

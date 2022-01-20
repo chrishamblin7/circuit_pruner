@@ -17,12 +17,21 @@ if __name__ == '__main__':
 
 
 
-	config = 'configs/alexnet_config.py'
+	config = 'configs/alexnet_sparse_config.py'
 	layers = ['features_3','features_6','features_8','features_10']
-	data_path = 'image_data/imagenet_2/'
+	data_path = 'image_data/imagenet_2'
 	units = range(20)
 	device = 'cuda:0'
 	batch_size = 200
+
+	feature_targets = None
+	#set this to select specific feature taer
+	feature_targets = {
+						'features_3':list(range(192)),
+						'features_6':list(range(384)),
+						'features_8':list(range(256)),
+						'features_10':list(range(256))
+						}
 
 	#get variables from config
 	if '/' in config:
@@ -52,11 +61,11 @@ if __name__ == '__main__':
 	
 	start = time.time()
 
+	if feature_targets is None:
+		feature_targets = {}
 
-	feature_targets = {}
-
-	for layer in layers:
-		feature_targets[layer] = list(units)
+		for layer in layers:
+			feature_targets[layer] = list(units)
 
 
 

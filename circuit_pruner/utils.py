@@ -167,16 +167,29 @@ def color_vec_2_str(colorvec,a='1'):
     return 'rgba(%s,%s,%s,%s)'%(str(int(colorvec[0])),str(int(colorvec[1])),str(int(colorvec[2])),a)
 
 
+### PATH ###
+
+def update_sys_path(path):
+	full_path = os.path.abspath(path)
+	if full_path not in sys.path:
+		sys.path.insert(0,full_path)
+
+def load_config(config_path):
+	if '/' in config_path:
+		config_root_path = ('/').join(config_path.split('/')[:-1])
+		update_sys_path(config_root_path)
+	config_module = config_path.split('/')[-1].replace('.py','')
+	config = __import__(config_module)
+	return config
+
+
+
 ### TRULY MISC ###
 
 def get_nth_element_from_nested_list(l,n):    #this seems to come up with the nested layer lists
 	flat_list = [item for sublist in l for item in sublist]
 	return flat_list[n]
 
-def update_sys_path(path):
-	full_path = os.path.abspath(path)
-	if full_path not in sys.path:
-		sys.path.insert(0,full_path)
 
 def minmax_normalize_between_values(vec,min_v,max_v):
     return (max_v-min_v)*(vec-np.min(vec))/(np.max(vec)-np.min(vec))+min_v

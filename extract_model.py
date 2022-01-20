@@ -19,10 +19,9 @@ import numpy as np
 from scipy.stats import spearmanr, pearsonr
 from math import ceil
 
-
-
-
 import argparse
+
+
 def get_args():
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--layer", type = str, 
@@ -37,7 +36,7 @@ def get_args():
 						help='number of batches for dataloader')             
 	parser.add_argument('--sparsity', type=float, default=.5,
 						help='number of batches for dataloader') 
-
+	parser.add_argument('--dont-save-masks', action='store_true', default=False, help='dont save the masks in the output dictionary')
 
 
 
@@ -46,6 +45,9 @@ def get_args():
 
 
 if __name__ == '__main__':
+
+
+
 
 	args = get_args()
 	print(args)
@@ -84,7 +86,7 @@ if __name__ == '__main__':
 	ranks_folder = 'circuit_ranks/'+params.name+'/'+imageset+'/'+method+'/'
 
 	for f in os.listdir(ranks_folder):
-		if feature_name in f:
+		if feature_name+'_' in f:
 			layer_ranks = torch.load(ranks_folder+f)
 			break
 
@@ -253,6 +255,15 @@ if __name__ == '__main__':
 	effect_mask = kernel_mask_2_effective_kernel_mask(mask)
 	
 
+	#live inputs, the pruned model might not have inputs leading to all 3 input channels, so we need to check
+	#for those so we can get rid of those channels of the input images
+
+	live_input_channels = []
+
+	for i in range(effect_mask[0][0].shape[0]):
+		tot = torch.sum(effect_mask[0][:,i])
+		if tot > 0:
+			live_input_channels.append(i)
 
 	#check for TOTAL COLLAPSE (there is no path to the target feature, the extracted circuit is literally nothing)
 	total_collapse = False
@@ -265,15 +276,19 @@ if __name__ == '__main__':
 
 
 	if not total_collapse:
-		#xtract model with the effective_mask,
+		#extract model with the effective_mask,
 
-		del masked_model
+		#del masked_model
+		
 
 		pruned_model = extract_circuit_with_eff_mask(model,effect_mask)
 
-		del model
+		#del model
 
 		pruned_model = pruned_model.to(device)
+
+
+		feature_target = {layer:[0]} #new model only has 1 output, and its the feature target
 
 		print('prune model time: %s'%str(time.time()-start))
 
@@ -296,12 +311,15 @@ if __name__ == '__main__':
 		#save the pre extraction target activations, we might want to know what they were later
 		pruned_target_activations = {}
 
+
+
 		for it in range(iters):
 			#clear_feature_targets_from_net(pruned_model)
 
 			# Grab a single batch from the training dataset
 			inputs, targets = next(iter_dataloader)
 			inputs = inputs.to(device)
+			inputs = inputs[:,live_input_channels]
 
 			masked_pruned_model.zero_grad()
 
@@ -346,14 +364,22 @@ if __name__ == '__main__':
 		'masked_k':k,
 		'effective_k':effective_sum,
 		'effective_sparsity':float(effective_sum)/float(total_params),
-		'device':device
+		'device':device,
 			}
 
 	if not total_collapse:
 		save_object['pruned_model'] = pruned_model
 		save_object['pruned_target_activations'] = pruned_target_activations
 
-	
+
+	if not args.dont_save_masks:
+		for i,l in enumerate(mask):
+			mask[i] = mask[i].to('cpu')
+		for l in effect_mask:
+			effect_mask[i] = effect_mask[i].to('cpu')
+
+		save_object['mask'] = mask
+		save_object['effective_mask'] = effect_mask
 
 
 

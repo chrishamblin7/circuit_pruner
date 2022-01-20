@@ -1,9 +1,10 @@
 from subprocess import call
 
-config = 'configs/alexnet_config.py'
-layers = ['features_3','features_6','features_8','features_10']
+config = 'configs/alexnet_sparse_config.py'
+#layers = ['features_3','features_6','features_8','features_10']
 data_path = 'image_data/imagenet_2/'
-units = range(20)
+layers = ['features_6']
+units = range(369,384)
 device = 'cuda:0'
 
 
