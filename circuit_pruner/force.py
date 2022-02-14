@@ -595,7 +595,7 @@ def circuit_SNIP(net, dataloader, feature_targets = None, feature_targets_coeffi
 	
 	# Gather all scores in a single vector and normalise
 	all_scores = torch.cat([torch.flatten(x) for x in structure_grads_abs])
-	norm_factor = torch.sum(all_scores)
+	norm_factor = torch.sum(abs(all_scores))
 	all_scores.div_(norm_factor)
 	
 	#get num params to keep
@@ -1020,8 +1020,10 @@ def snip_scores(net,dataloader, feature_targets = None, feature_targets_coeffici
 def mask_from_sparsity(rank_list, k):
 
 	all_scores = torch.cat([torch.flatten(x) for x in rank_list])
-	norm_factor = torch.sum(all_scores)
+	norm_factor = torch.sum(abs(all_scores))
 	all_scores.div_(norm_factor)
+
+	all_scores = all_scores.type(torch.float)
 
 	threshold, _ = torch.topk(all_scores, k, sorted=True)
 	acceptable_score = threshold[-1]

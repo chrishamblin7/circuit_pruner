@@ -130,5 +130,121 @@ def extract_circuit_with_eff_mask(model,eff_mask):
 	return subgraph_model
 
 
+def mask_from_sparsity(rank_list, k):
+
+	all_scores = torch.cat([torch.flatten(x) for x in rank_list])
+	norm_factor = torch.sum(abs(all_scores))
+	all_scores.div_(norm_factor)
+
+	all_scores = all_scores.type(torch.float)
+
+	threshold, _ = torch.topk(all_scores, k, sorted=True)
+	acceptable_score = threshold[-1]
+	cum_sal = torch.sum(threshold)
+
+	mask = []
+
+	for g in rank_list:
+		mask.append(((g / norm_factor) >= acceptable_score).float())
+		
+	return mask,cum_sal
 
 
+
+
+
+
+def dissected_model_ranks_2_circuit_model(layer_ranks,sparsity,model,feature_targets,device,method='actxgrad',structure='edges',use_effective_mask=True):
+	rank_list = []
+	
+
+	# HACK specific to alexnet
+	depths = {'features_0':1,'features_3':2,'features_6':3,'features_8':4,'features_10':5}
+	layer = list(feature_targets.keys())[0]
+	for l in range(depths[layer]):
+		#print(layer_ranks['ranks'][structure][method][l][0])
+		rank_list.append(torch.tensor(layer_ranks['ranks'][structure][method][l][1]).to('cpu'))
+	
+
+	#model
+
+	masked_model = deepcopy(model)
+	masked_model = masked_model.to(device)
+
+
+	setup_net_for_circuit_prune(masked_model,feature_targets, rank_field = 'image')
+
+
+
+	reset_masks_in_net(masked_model)
+
+	#total params
+	total_params = 0
+	for l in masked_model.modules():
+		if isinstance(l, nn.Conv2d):
+			if not l.last_layer:  #all params potentially relevant
+				if structure in ['kernels','edges']:
+					total_params += int(l.weight.shape[0]*l.weight.shape[1])
+				else:
+					total_params += int(l.weight.shape[0])
+
+			else: #only weights leading into feature targets are relevant
+				if structure in ['kernels','edges']:
+					total_params += int(len(l.feature_targets_indices)*l.weight.shape[1])
+				else:
+					total_params += len(l.feature_targets_indices)
+				break
+
+
+	#setup original mask
+	print('target sparsity: %s'%str(sparsity))
+	print('total params to feature: %s'%str(total_params))
+
+	k = ceil(total_params*sparsity)
+
+	print('kept params in original mask: %s'%str(k))
+	#generate mask
+	mask,cum_sal = mask_from_sparsity(rank_list,k)
+
+
+	orig_mask_sum = 0
+	for l in mask:
+		orig_mask_sum += int(torch.sum(l))
+
+
+	if structure is not 'weights':
+		expanded_mask = expand_structured_mask(mask,masked_model) #this weight mask will get applied to the network on the next iteration
+	else:
+		expanded_mask = mask
+
+	for l in expanded_mask:
+		l = l.to(device)
+
+
+	#apply mask
+	if structure == 'filters':
+		reset_masks_in_net(masked_model)
+		apply_filter_mask(masked_model,mask) #different than masking weights, because it also masks biases
+	else:
+		apply_mask(masked_model,expanded_mask) 
+
+	if use_effective_mask:
+		effect_mask = kernel_mask_2_effective_kernel_mask(mask)
+
+		#check for TOTAL COLLAPSE (there is no path to the target feature, the extracted circuit is literally nothing)
+		total_collapse = False
+		effective_sum  = 0
+		for l in effect_mask:
+			effective_sum += int(torch.sum(l))
+		print('effective_sparsity: %s'%str(effective_sum/total_params))
+		if effective_sum == 0:
+			print('TOTAL COLLAPSE')
+			total_collapse = True
+
+
+		if not total_collapse:
+			pruned_model = extract_circuit_with_eff_mask(model,effect_mask)
+
+
+	if not total_collapse:
+		return pruned_model,effect_mask

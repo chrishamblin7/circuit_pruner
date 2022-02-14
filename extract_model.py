@@ -99,7 +99,7 @@ if __name__ == '__main__':
 		depths = {'features_0':1,'features_3':2,'features_6':3,'features_8':4,'features_10':5}
 
 		for l in range(depths[layer]):
-			print(layer_ranks['ranks'][structure][method][l][0])
+			#print(layer_ranks['ranks'][structure][method][l][0])
 			rank_list.append(torch.tensor(layer_ranks['ranks'][structure][method][l][1]).to('cpu'))
 		
 	elif method == 'snip':
