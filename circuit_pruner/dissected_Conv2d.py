@@ -534,12 +534,6 @@ def get_activations_from_dissected_Conv2d_modules(module,layer_activations=None)
 	return layer_activations
 
 
-
-
-
-
-
-
 def get_ranks_from_dissected_Conv2d_modules(module,layer_ranks=None,weight_rank=False):     #run through all model modules recursively, and pull the ranks stored in dissected_Conv2d modules 
 	if layer_ranks is None:    #initialize the output dictionary if we are not recursing and havent done so yet
 		if weight_rank:
@@ -565,3 +559,14 @@ def get_ranks_from_dissected_Conv2d_modules(module,layer_ranks=None,weight_rank=
 		elif len(list(submodule.children())) > 0:
 			layer_ranks = get_ranks_from_dissected_Conv2d_modules(submodule,layer_ranks=layer_ranks,weight_rank=weight_rank)   #module has modules inside it, so recurse on this module
 	return layer_ranks
+
+
+def get_ranklist_from_dissected_Conv2d_modules(model,structure='edges',method='actxgrad'):
+	full_ranks = get_ranks_from_dissected_Conv2d_modules(model)
+
+	rank_list = []
+	for l in range(len(full_ranks[structure][method])):
+		if len(full_ranks[structure][method][l][1].nonzero()[1])>0:
+			rank_list.append(torch.tensor(full_ranks[structure][method][l][1]).to('cpu'))
+
+	return rank_list

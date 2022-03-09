@@ -162,6 +162,8 @@ def receptive_field_for_unit(receptive_field_dict, layer, unit_position):
     ```
     Out: [(62.0, 161.0), (62.0, 161.0)]
     """
+    if ('feature' not in list(receptive_field_dict.keys())[0]) and ('feature' in layer):
+        layer = str(int(layer[-1])+1) #hack
     input_shape = receptive_field_dict["input_size"]
     if layer in receptive_field_dict:
         rf_stats = receptive_field_dict[layer]
