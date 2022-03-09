@@ -209,7 +209,7 @@ class dissected_Conv2d(torch.nn.Module):       #2d conv Module class that has pr
 				for in_chan in self.add_indices[out_chan]:
 					in_acts_list.append(self.preadd_out[:,in_chan,:,:].unsqueeze(dim=1).unsqueeze(dim=1))                    
 				out_acts_list.append(torch.cat(in_acts_list,dim=2))
-			return torch.cat(out_acts_list,dim=1).cpu().detach().numpy().astype('float16')
+			return torch.cat(out_acts_list,dim=1).cpu().detach().numpy().astype('float32')
 
 		else:
 			out_acts_list = []
@@ -218,7 +218,7 @@ class dissected_Conv2d(torch.nn.Module):       #2d conv Module class that has pr
 				for in_chan in self.add_indices[out_chan]:
 					in_acts_list.append(self.preadd_ranks[rank_type][in_chan].unsqueeze(dim=0).unsqueeze(dim=0))                 
 				out_acts_list.append(torch.cat(in_acts_list,dim=1))
-			output = torch.cat(out_acts_list,dim=0).cpu().detach().numpy().astype('float16')
+			output = torch.cat(out_acts_list,dim=0).cpu().detach().numpy().astype('float32')
 			return output
 						
 	def average_ranks(self):
@@ -559,7 +559,7 @@ def get_ranks_from_dissected_Conv2d_modules(module,layer_ranks=None,weight_rank=
 
 			for rank_type in rank_types:
 				#submodule.gen_normalizations(rank_type)
-				layer_ranks['nodes'][rank_type].append([submodule.name,submodule.postbias_ranks[rank_type].cpu().detach().numpy().astype('float16')])
+				layer_ranks['nodes'][rank_type].append([submodule.name,submodule.postbias_ranks[rank_type].cpu().detach().numpy().astype('float32')])
 				layer_ranks['edges'][rank_type].append([submodule.name,submodule.format_edges(data= 'ranks',rank_type=rank_type,weight_rank=weight_rank)])
 				#print(layer_ranks['edges'][-1].shape)
 		elif len(list(submodule.children())) > 0:

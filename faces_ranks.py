@@ -184,7 +184,7 @@ for nodeid in nodeids:
 
 		ranks_slow[nodeid][image_name] = {}
 		ranks_slow[nodeid][image_name]['ranks'] = get_ranks_from_dissected_Conv2d_modules(dissected_model)
-		ranks_slow[nodeid][image_name]['activation'] =  dissected_model.features[int(layer_full_name.split('_')[-1])].postbias_out[0,unit,5,5].cpu().detach().numpy().astype('float16')
+		ranks_slow[nodeid][image_name]['activation'] =  dissected_model.features[int(layer_full_name.split('_')[-1])].postbias_out[0,unit,5,5].cpu().detach().numpy().astype('float32')
 
 
 

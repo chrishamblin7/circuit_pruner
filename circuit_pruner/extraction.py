@@ -155,15 +155,18 @@ def mask_from_sparsity(rank_list, k):
 
 
 def dissected_model_ranks_2_circuit_model(layer_ranks,sparsity,model,feature_targets,device,method='actxgrad',structure='edges',use_effective_mask=True):
+	
 	rank_list = []
 	
+	if 'ranks' in layer_ranks.keys():
+		layer_ranks = layer_ranks['ranks']
 
 	# HACK specific to alexnet
 	depths = {'features_0':1,'features_3':2,'features_6':3,'features_8':4,'features_10':5}
 	layer = list(feature_targets.keys())[0]
 	for l in range(depths[layer]):
 		#print(layer_ranks['ranks'][structure][method][l][0])
-		rank_list.append(torch.tensor(layer_ranks['ranks'][structure][method][l][1]).to('cpu'))
+		rank_list.append(torch.tensor(layer_ranks[structure][method][l][1]).to('cpu'))
 	
 
 	#model
