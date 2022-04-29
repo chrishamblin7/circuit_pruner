@@ -37,36 +37,144 @@ def preprocess_image(image_path,params):
 
 #return list of names for conv modules based on their nested module names '_' seperated
 def get_conv_full_names(model,mod_names = [],mod_full_names = []):
-    #gen names based on nested modules
-    for name, module in model._modules.items():
-        if len(list(module.children())) > 0:
-            mod_names.append(str(name))
-            # recurse
-            mod_full_names = get_conv_full_names(module,mod_names = mod_names, mod_full_names = mod_full_names)
-            mod_names.pop()
+	#gen names based on nested modules
+	for name, module in model._modules.items():
+		if len(list(module.children())) > 0:
+			mod_names.append(str(name))
+			# recurse
+			mod_full_names = get_conv_full_names(module,mod_names = mod_names, mod_full_names = mod_full_names)
+			mod_names.pop()
 
-        if isinstance(module, torch.nn.modules.conv.Conv2d):    # found a 2d conv module
-            mod_full_names.append('_'.join(mod_names+[name]))
-            #new_module = dissected_Conv2d(module, name='_'.join(mod_names+[name]), store_activations=store_activations,store_ranks=store_ranks,clear_ranks=clear_ranks,cuda=cuda,device=device) 
-            #model._modules[name] = new_module
-    return mod_full_names     
+		if isinstance(module, torch.nn.modules.conv.Conv2d):    # found a 2d conv module
+			mod_full_names.append('_'.join(mod_names+[name]))
+			#new_module = dissected_Conv2d(module, name='_'.join(mod_names+[name]), store_activations=store_activations,store_ranks=store_ranks,clear_ranks=clear_ranks,cuda=cuda,device=device) 
+			#model._modules[name] = new_module
+	return mod_full_names     
 
+
+def ref_name_modules(net):
+	
+	# recursive function to get layers
+	def name_layers(net, prefix=[]):
+		if hasattr(net, "_modules"):
+			for name, layer in net._modules.items():
+
+				if layer is None:
+					# e.g. GoogLeNet's aux1 and aux2 layers
+					continue
+				
+				layer.ref_name = "_".join(prefix + [name])
+				
+				name_layers(layer,prefix=prefix+[name])
+
+	name_layers(net)
+
+
+def show_model_layer_names(model, getLayerRepr=False,printer=True):
+	"""
+	If getLayerRepr is True, return a OrderedDict of layer names, layer representation string pair.
+	If it's False, just return a list of layer names
+	"""
+	
+	layers = OrderedDict() if getLayerRepr else []
+	conv_linear_layers = []
+	# recursive function to get layers
+	def get_layers(net, prefix=[]):
+		
+		if hasattr(net, "_modules"):
+			for name, layer in net._modules.items():
+
+				if layer is None:
+					# e.g. GoogLeNet's aux1 and aux2 layers
+					continue
+				if getLayerRepr:
+					layers["_".join(prefix+[name])] = layer.__repr__()
+				else:
+					layers.append("_".join(prefix + [name]))
+				
+				if isinstance(layer, nn.Conv2d):
+					conv_linear_layers.append(("_".join(prefix + [name]),'  conv'))
+				elif isinstance(layer, nn.Linear):
+					conv_linear_layers.append(("_".join(prefix + [name]),'  linear'))
+					
+				get_layers(layer, prefix=prefix+[name])
+				
+	get_layers(model)
+	
+	if printer:
+		print('All Layers:\n')
+		for layer in layers:
+			print(layer)
+
+		print('\nConvolutional and Linear layers:\n')
+		for layer in conv_linear_layers:
+			print(layer)
+
+	return layers
+
+
+def get_model_conv_weights(model):
+	weights = []
+	# recursive function to get layers
+	def get_weights(module):
+		if hasattr(module, "_modules"):
+			for name, layer in module._modules.items():
+
+				if layer is None:
+					# e.g. GoogLeNet's aux1 and aux2 layers
+					continue
+				
+				if isinstance(layer, nn.Conv2d):
+					weights.append(layer.weight.detach().cpu())
+
+				get_weights(layer)
+
+	get_weights(model)
+
+	return weights
+
+
+def get_model_filterids(model):
+    ref_name_modules(model)
     
+    out = []
+    
+    next_filterid = 0
+    def get_ids(module, next_filterid = 0):
+
+        if hasattr(module, "_modules"):
+            for name, layer in module._modules.items():
+
+                if layer is None:
+                    # e.g. GoogLeNet's aux1 and aux2 layers
+                    continue
+                if isinstance(layer, nn.Conv2d):
+                    num_filters = layer.weight.shape[0]
+                    out.append([layer.ref_name,list(range(next_filterid,next_filterid+num_filters))])
+                    next_filterid = next_filterid+num_filters
+
+                get_ids(layer, next_filterid = next_filterid)
+
+    get_ids(model)
+    return out
+
+
+	
 #return list of names for conv modules based on their simple order, first conv is 'conv1', then 'conv2' etc. 
 def get_conv_simple_names(model):
-    names = []
-    count = 0
-    for layer in model.modules():
-        if isinstance(layer, nn.Conv2d):
-            names.append('conv'+str(count))
-            count+=1
-    return names
+	names = []
+	count = 0
+	for layer in model.modules():
+		if isinstance(layer, nn.Conv2d):
+			names.append('conv'+str(count))
+			count+=1
+	return names
  
 # returns a dict that maps simple names to full names
 def gen_conv_name_dict(model):
-    simple_names = get_conv_simple_names(model)
-    full_names = get_conv_full_names(model)
-    return dict(zip(simple_names, full_names))
+	simple_names = get_conv_simple_names(model)
+	full_names = get_conv_full_names(model)
+	return dict(zip(simple_names, full_names))
 
 
 def nodeid_2_perlayerid(nodeid,params):    #takes in node unique id outputs tuple of layer and within layer id
@@ -127,27 +235,27 @@ def edgename_2_singlenum(model,edgename,params):
 ### TENSORS ###
 
 def unravel_index(indices,shape):
-    r"""Converts flat indices into unraveled coordinates in a target shape.
+	r"""Converts flat indices into unraveled coordinates in a target shape.
 
-    This is a `torch` implementation of `numpy.unravel_index`.
+	This is a `torch` implementation of `numpy.unravel_index`.
 
-    Args:
-        indices: A tensor of (flat) indices, (*, N).
-        shape: The targeted shape, (D,).
+	Args:
+		indices: A tensor of (flat) indices, (*, N).
+		shape: The targeted shape, (D,).
 
-    Returns:
-        The unraveled coordinates, (*, N, D).
-    """
+	Returns:
+		The unraveled coordinates, (*, N, D).
+	"""
 
-    coord = []
+	coord = []
 
-    for dim in reversed(shape):
-        coord.append(indices % dim)
-        indices = indices // dim
+	for dim in reversed(shape):
+		coord.append(indices % dim)
+		indices = indices // dim
 
-    coord = torch.stack(coord[::-1], dim=-1)
+	coord = torch.stack(coord[::-1], dim=-1)
 
-    return coord
+	return coord
 
 
 ###  NETWORKS ###
@@ -164,7 +272,7 @@ def rgb2hex(r, g, b):
 	return '#{:02x}{:02x}{:02x}'.format(r, g, b)
 
 def color_vec_2_str(colorvec,a='1'):
-    return 'rgba(%s,%s,%s,%s)'%(str(int(colorvec[0])),str(int(colorvec[1])),str(int(colorvec[2])),a)
+	return 'rgba(%s,%s,%s,%s)'%(str(int(colorvec[0])),str(int(colorvec[1])),str(int(colorvec[2])),a)
 
 
 ### PATH ###
@@ -192,18 +300,18 @@ def get_nth_element_from_nested_list(l,n):    #this seems to come up with the ne
 
 
 def minmax_normalize_between_values(vec,min_v,max_v):
-    return (max_v-min_v)*(vec-np.min(vec))/(np.max(vec)-np.min(vec))+min_v
-    
+	return (max_v-min_v)*(vec-np.min(vec))/(np.max(vec)-np.min(vec))+min_v
+	
 def min_distance(x,y,minimum=1):
-    dist = np.linalg.norm(x-y)
-    if dist > minimum:
-        return dist,True
-    else:
-        return dist,False
-    
+	dist = np.linalg.norm(x-y)
+	if dist > minimum:
+		return dist,True
+	else:
+		return dist,False
+	
 def multipoint_min_distance(points):   #takes numpy array of shape (# points, # dimensions)
-    dist_mat = distance_matrix(points,points)
-    dist_mat[np.tril_indices(dist_mat.shape[0], 0)] = 10000
-    print(dist_mat)
-    return np.min(dist_mat)
+	dist_mat = distance_matrix(points,points)
+	dist_mat[np.tril_indices(dist_mat.shape[0], 0)] = 10000
+	print(dist_mat)
+	return np.min(dist_mat)
 

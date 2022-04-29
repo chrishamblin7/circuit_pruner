@@ -1,51 +1,7 @@
 from collections import OrderedDict
 from circuit_pruner.custom_exceptions import TargetReached
+from circuit_pruner.utils import *
 from copy import deepcopy
-
-
-def show_model_layer_names(model, getLayerRepr=False,printer=True):
-	"""
-	If getLayerRepr is True, return a OrderedDict of layer names, layer representation string pair.
-	If it's False, just return a list of layer names
-	"""
-	
-	layers = OrderedDict() if getLayerRepr else []
-	conv_linear_layers = []
-	# recursive function to get layers
-	def get_layers(net, prefix=[]):
-		
-		if hasattr(net, "_modules"):
-			for name, layer in net._modules.items():
-
-				if layer is None:
-					# e.g. GoogLeNet's aux1 and aux2 layers
-					continue
-				if getLayerRepr:
-					layers["_".join(prefix+[name])] = layer.__repr__()
-				else:
-					layers.append("_".join(prefix + [name]))
-				
-				if isinstance(layer, nn.Conv2d):
-					conv_linear_layers.append(("_".join(prefix + [name]),'  conv'))
-				elif isinstance(layer, nn.Linear):
-					conv_linear_layers.append(("_".join(prefix + [name]),'  linear'))
-					
-				get_layers(layer, prefix=prefix+[name])
-				
-	get_layers(model)
-	
-	if printer:
-		print('All Layers:\n')
-		for layer in layers:
-			print(layer)
-
-		print('\nConvolutional and Linear layers:\n')
-		for layer in conv_linear_layers:
-			print(layer)
-
-	return layers
-
-
 
 import torch
 import torch.nn as nn
@@ -56,28 +12,6 @@ import types
 
 from math import log, exp, ceil
 
-
-
-
-
-def ref_name_modules(net):
-	
-	# recursive function to get layers
-	def name_layers(net, prefix=[]):
-		if hasattr(net, "_modules"):
-			for name, layer in net._modules.items():
-
-				if layer is None:
-					# e.g. GoogLeNet's aux1 and aux2 layers
-					continue
-				
-				layer.ref_name = "_".join(prefix + [name])
-				
-				name_layers(layer,prefix=prefix+[name])
-
-	name_layers(net)
-
-	
 	
 def get_last_layer_from_feature_targets(net, feature_targets):
 	
@@ -88,6 +22,10 @@ def get_last_layer_from_feature_targets(net, feature_targets):
 	
 	
 	def check_layers(net,last_layer=None):
+
+		if last_layer is not None:
+			return last_layer
+
 		if hasattr(net, "_modules"):
 			for name, layer in reversed(net._modules.items()):  #use reversed to start from the end of the network
 
@@ -101,7 +39,7 @@ def get_last_layer_from_feature_targets(net, feature_targets):
 						break
 		
 						
-				last_layer = check_layers(layer)
+				last_layer = check_layers(layer, last_layer=last_layer)
 		
 		return last_layer
 
@@ -149,8 +87,9 @@ def feature_targets_list_2_dict(feature_targets,feature_targets_coefficients=Non
 
 def setup_net_for_circuit_prune(net, feature_targets=None,save_target_activations=False,rank_field = 'image'):
 	
-	assert rank_field in ('image','min','max')
-	
+	if not isinstance(rank_field,list):
+		assert rank_field in ('image','min','max')
+
 	#name model modules
 	ref_name_modules(net)
 	
@@ -270,12 +209,19 @@ def circuit_prune_forward_conv2d(self, x):
 				min_acts = x.view(x.size(0),x.size(1), x.size(2)*x.size(3)).min(dim=-1).values
 				min_acts_target = min_acts[:,feature_idx]
 				self.feature_targets[feature_idx] = min_acts_target.mean()
-				
+
 			elif isinstance(self.rank_field,list):
-				raise Exception('List type rank field not yet implemented, use "min", "max",or "image" as the rank field')
-				#target_acts = 
-				#optim_target = target_acts.mean()
-			#print(optim_target)
+				d = x.get_device()
+				if d == -1:
+					device='cpu'
+				else:
+					device='cuda:'+str(d)
+				act_targets_sum = torch.FloatTensor(1).zero_().to(device) 
+				for i in range(len(self.rank_field)):
+					act_targets_sum += x[i,feature_idx,int(self.rank_field[i][0]),int(self.rank_field[i][1])]
+
+				self.feature_targets[feature_idx] = act_targets_sum/len(self.rank_field)
+				
 
 			if self.save_target_activations:
 				self.target_activations[feature_idx] = x[:,feature_idx,:,:].data.to('cpu')
@@ -305,7 +251,7 @@ def circuit_prune_forward_linear(self, x):
 			self.feature_targets[feature_idx] = avg_activations[feature_idx] 
 			
 			if self.save_target_activations:
-				self.target_activations[feature_idx] = x[:,feature_idx,:].data.to('cpu')
+				self.target_activations[feature_idx] = x[:,feature_idx].data.to('cpu')
 	
 	if self.last_layer: #stop model forward pass if all targets reached
 		raise TargetReached
@@ -423,9 +369,9 @@ def save_target_activations_in_net(net,save=True):
    
 
 
-def get_saved_target_activations_from_net(net):
+def get_saved_target_activations_from_net(net,detach=True):
 
-	def fetch_activations(net,target_activations = {}):
+	def fetch_activations(net,target_activations = {},detach=detach):
 		if hasattr(net, "_modules"):
 			for name, layer in net._modules.items():
 
@@ -437,10 +383,14 @@ def get_saved_target_activations_from_net(net):
 					if layer.save_target_activations:
 						if layer.target_activations != {}:
 							for idx in layer.target_activations:
-								target_activations[layer.ref_name+':'+str(idx)] = layer.target_activations[idx]
+								if detach:
+									target_activations[layer.ref_name+':'+str(idx)] = layer.target_activations[idx].cpu().detach().numpy().astype('float32') 
+								else:
+									target_activations[layer.ref_name+':'+str(idx)] = layer.target_activations[idx]
+
 
 						
-				target_activations = fetch_activations(layer, target_activations = target_activations)
+				target_activations = fetch_activations(layer, target_activations = target_activations,detach=detach)
 		
 		return target_activations
 				
@@ -482,7 +432,7 @@ def make_net_mask_only(net):
 			layer.feature_targets_indices = None
 
 	
-def circuit_SNIP(net, dataloader, feature_targets = None, feature_targets_coefficients = None, full_dataset = True, keep_ratio=.1, num_params_to_keep=None, device=None, structure='weights', mask=None, criterion= None, setup_net=True,rank_field='image', return_ranks = False):
+def circuit_SNIP(net, dataloader, feature_targets = None, feature_targets_coefficients = None, full_dataset = True, keep_ratio=.1, num_params_to_keep=None, device=None, structure='weights', mask=None, criterion= None, setup_net=True,rank_field='image', use_abs_ranks=True,return_ranks = False):
 	'''
 	if num_params_to_keep is specified, this argument overrides keep_ratio
 	'''
@@ -527,7 +477,7 @@ def circuit_SNIP(net, dataloader, feature_targets = None, feature_targets_coeffi
 		iters = len(iter_dataloader)
 	
 	
-	grads_abs = [] #computed scores
+	grads = [] #computed scores
 	
 
 	for it in range(iters):
@@ -559,17 +509,20 @@ def circuit_SNIP(net, dataloader, feature_targets = None, feature_targets_coeffi
 		loss.backward()
 
 		#get weight-wise scores
-		if grads_abs == []:
+		if grads == []:
 			for layer in net.modules():
 				if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear):
-					grads_abs.append(torch.abs(layer.weight_mask.grad))
+					if use_abs_ranks:
+						grads.append(torch.abs(layer.weight_mask.grad))
+					else:
+						grads.append(layer.weight_mask.grad)
 					if layer.last_layer:
 						break
 		else:
 			count = 0
 			for layer in net.modules():
 				if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear):
-					grads_abs[count] += torch.abs(layer.weight_mask.grad)        
+					grads[count] += torch.abs(layer.weight_mask.grad)       
 					count += 1
 					if layer.last_layer:
 						break
@@ -579,22 +532,21 @@ def circuit_SNIP(net, dataloader, feature_targets = None, feature_targets_coeffi
 	#structure scoring by weights, kernels, or filters   
 	
 	if structure == 'weights':
-		structure_grads_abs = grads_abs
+		structure_grads = grads
 	elif structure == 'kernels':
-		structure_grads_abs = []
-		for grad in grads_abs:
+		structure_grads = []
+		for grad in grads:
 			if len(grad.shape) == 4: #conv2d layer
-				structure_grads_abs.append(torch.mean(grad,dim = (2,3))) #average across height and width of each kernel
+				structure_grads.append(torch.mean(grad,dim = (2,3))) #average across height and width of each kernel
 	else:
-		structure_grads_abs = []
-		for grad in grads_abs:
+		structure_grads = []
+		for grad in grads:
 			if len(grad.shape) == 4: #conv2d layer
-				structure_grads_abs.append(torch.mean(grad,dim = (1,2,3))) #average across channel height and width of each filter
+				structure_grads.append(torch.mean(grad,dim = (1,2,3))) #average across channel height and width of each filter
 		
 
-	
 	# Gather all scores in a single vector and normalise
-	all_scores = torch.cat([torch.flatten(x) for x in structure_grads_abs])
+	all_scores = torch.cat([torch.flatten(x) for x in structure_grads])
 	norm_factor = torch.sum(abs(all_scores))
 	all_scores.div_(norm_factor)
 	
@@ -604,17 +556,26 @@ def circuit_SNIP(net, dataloader, feature_targets = None, feature_targets_coeffi
 	threshold, _ = torch.topk(all_scores, num_params_to_keep, sorted=True)
 	acceptable_score = threshold[-1]
 
-	keep_masks = []
 
-	for g in structure_grads_abs:
-		keep_masks.append(((g / norm_factor) >= acceptable_score).float())
+	keep_masks = []
+	if acceptable_score == 0:
+		print('gradients from this feature are sparse,\
+the minimum acceptable rank at this sparsity has a score of zero! \
+we will return a mask thats smaller than you asked, by masking all \
+parameters with a score of zero.')
+	
+		for g in structure_grads:
+			keep_masks.append((g / norm_factor > acceptable_score).float())
+	else:
+		for g in structure_grads:
+			keep_masks.append(((g / norm_factor) > acceptable_score).float())
 
 	#print(torch.sum(torch.cat([torch.flatten(x == 1) for x in keep_masks])))
 
 	if not return_ranks:
 		return keep_masks
 	else:
-		return grads_abs,keep_masks
+		return grads,keep_masks
 
 	
 
@@ -660,7 +621,7 @@ def circuit_snip_rank(net, dataloader, feature_targets = None, feature_targets_c
 		iters = len(iter_dataloader)
 	
 	
-	grads_abs = [] #computed scores
+	grads = [] #computed scores
 	
 
 	for it in range(iters):
@@ -692,22 +653,22 @@ def circuit_snip_rank(net, dataloader, feature_targets = None, feature_targets_c
 		loss.backward()
 
 		#get weight-wise scores
-		if grads_abs == []:
+		if grads == []:
 			for layer in net.modules():
 				if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear):
-					grads_abs.append(torch.abs(layer.weight_mask.grad))
+					grads.append(torch.abs(layer.weight_mask.grad))
 					if layer.last_layer:
 						break
 		else:
 			count = 0
 			for layer in net.modules():
 				if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear):
-					grads_abs[count] += torch.abs(layer.weight_mask.grad)        
+					grads[count] += torch.abs(layer.weight_mask.grad)        
 					count += 1
 					if layer.last_layer:
 						break
 	  
-	return(grads_abs)
+	return(grads)
 
 
 
@@ -766,7 +727,7 @@ def expand_structured_mask(mask,net):
 
 
 
-def circuit_FORCE_pruning(net, dataloader, feature_targets = None,feature_targets_coefficients = None, T=10,full_dataset = True, keep_ratio=.1, num_params_to_keep=None, device=None, structure='weights', rank_field = 'image', mask=None, setup_net=True, return_ranks = False):    #progressive skeletonization
+def circuit_FORCE_pruning(model, dataloader, feature_targets = None,feature_targets_coefficients = None,keep_ratio=.1, T=10, use_abs_ranks=True, full_dataset = True, num_params_to_keep=None, device=None, structure='weights', rank_field = 'image', mask=None, setup_net=True, return_ranks = False):    #progressive skeletonization
 
 	
 	assert structure in ('weights','kernels','filters')
@@ -774,7 +735,12 @@ def circuit_FORCE_pruning(net, dataloader, feature_targets = None,feature_target
 	
 	if device is None:
 		device = 'cuda' if torch.cuda.is_available() else 'cpu'
-	net = net.to(device)
+
+	model.to('cpu').eval()
+	net = deepcopy(model)
+	net = net.to(device).eval()	
+	for param in net.parameters():
+		param.requires_grad = False
 	
 	if setup_net:
 		setup_net_for_circuit_prune(net, feature_targets=feature_targets, rank_field = rank_field)
@@ -830,19 +796,28 @@ def circuit_FORCE_pruning(net, dataloader, feature_targets = None,feature_target
 		
 		#SNIP
 		if not return_ranks:
-			struct_mask = circuit_SNIP(net, dataloader, num_params_to_keep=k, feature_targets = feature_targets, feature_targets_coefficients = feature_targets_coefficients, structure=structure, mask=mask, full_dataset = full_dataset, device=device,setup_net=False)
+			struct_mask = circuit_SNIP(net, dataloader, num_params_to_keep=k, feature_targets = feature_targets, feature_targets_coefficients = feature_targets_coefficients, use_abs_ranks = use_abs_ranks, structure=structure, mask=mask, full_dataset = full_dataset, device=device,setup_net=False)
 		else:
-			grads_abs,struct_mask = circuit_SNIP(net, dataloader, num_params_to_keep=k, feature_targets = feature_targets, feature_targets_coefficients = feature_targets_coefficients, structure=structure, mask=mask, full_dataset = full_dataset, device=device,setup_net=False,return_ranks=True)
+			grads,struct_mask = circuit_SNIP(net, dataloader, num_params_to_keep=k, feature_targets = feature_targets, feature_targets_coefficients = feature_targets_coefficients, use_abs_ranks = use_abs_ranks, structure=structure, mask=mask, full_dataset = full_dataset, device=device,setup_net=False,return_ranks=True)
 		if structure is not 'weights':
 			mask = expand_structured_mask(struct_mask,net) #this weight mask will get applied to the network on the next iteration
 		else:
 			mask = struct_mask
+
 	apply_mask(net,mask)
+
+	mask_total = 0
+	mask_ones = 0
+	for l in mask:
+		mask_ones += int(torch.sum(l))
+		mask_total += int(torch.numel(l))
+	print('final mask: %s/%s params (%s)'%(mask_ones,mask_total,mask_ones/mask_total))
+
 
 	if not return_ranks:
 		return struct_mask
 	else:
-		return grads_abs,struct_mask
+		return grads,struct_mask
 
 
 
@@ -950,7 +925,7 @@ def snip_scores(net,dataloader, feature_targets = None, feature_targets_coeffici
 		iters = len(iter_dataloader)
 	
 	
-	grads_abs = [] #computed scores
+	grads = [] #computed scores
 	
 	for it in range(iters):
 		clear_feature_targets_from_net(net)
@@ -981,17 +956,17 @@ def snip_scores(net,dataloader, feature_targets = None, feature_targets_coeffici
 		loss.backward()
 
 		#get weight-wise scores
-		if grads_abs == []:
+		if grads == []:
 			for layer in net.modules():
 				if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear):
-					grads_abs.append(torch.abs(layer.weight_mask.grad))
+					grads.append(torch.abs(layer.weight_mask.grad))
 					if layer.last_layer:
 						break
 		else:
 			count = 0
 			for layer in net.modules():
 				if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear):
-					grads_abs[count] += torch.abs(layer.weight_mask.grad)        
+					grads[count] += torch.abs(layer.weight_mask.grad)        
 					count += 1
 					if layer.last_layer:
 						break
@@ -1000,20 +975,20 @@ def snip_scores(net,dataloader, feature_targets = None, feature_targets_coeffici
 	#structure scoring by weights, kernels, or filters   
 	
 	if structure == 'weights':
-		structure_grads_abs = grads_abs
+		structure_grads = grads
 	elif structure == 'kernels':
-		structure_grads_abs = []
-		for grad in grads_abs:
+		structure_grads = []
+		for grad in grads:
 			if len(grad.shape) == 4: #conv2d layer
-				structure_grads_abs.append(torch.mean(grad,dim = (2,3))) #average across height and width of each kernel
+				structure_grads.append(torch.mean(grad,dim = (2,3))) #average across height and width of each kernel
 	else:
-		structure_grads_abs = []
-		for grad in grads_abs:
+		structure_grads = []
+		for grad in grads:
 			if len(grad.shape) == 4: #conv2d layer
-				structure_grads_abs.append(torch.mean(grad,dim = (1,2,3))) #average across channel height and width of each filter
+				structure_grads.append(torch.mean(grad,dim = (1,2,3))) #average across channel height and width of each filter
 				
 		
-	return structure_grads_abs
+	return structure_grads
 
 
 
@@ -1078,3 +1053,46 @@ def kernel_mask_2_effective_kernel_mask(kernel_mask):
 	print('effective mask: %s kernels'%str(effective_sum))
 
 	return effective_mask
+
+
+def structured_mask_from_mask(mask, structure = 'kernels'):
+    
+    if structure == 'weights':
+        raise ValueError("to create a weight mask use the function circuit_pruner.force.expand_structured_mask")
+    if structure not in ['kernels','edges','filters','nodes']:
+        raise ValueError("Argument 'structure' must be in ['weights','kernels','edges','filters','nodes']")
+
+
+
+    if len(mask[0].shape) == 4:
+        in_structure = 'weights'
+    elif len(mask[0].shape) == 2:
+        in_structure = 'kernels'
+    elif len(mask[0].shape) == 1:
+        in_structure = 'filters'
+    else:
+        raise ValueError("Dont understand Shape %s of input mask, must be 1,2 or 4 (filters,kernels,weights)"%str(len(mask[0].shape)))
+
+    if in_structure == structure:
+        print('provided mask already of structure %s'%structure)
+        return mask
+
+    out_mask = []
+
+    for m in mask:
+        if structure in ['filters','nodes']:
+            m_flat = torch.reshape(m,(m.shape[0],-1))
+            z = torch.zeros(m_flat.shape[1])
+            m_out = ~torch.all(m_flat==z,dim=1)
+
+        else:
+            m_flat = torch.reshape(m,(m.shape[0]*m.shape[1],-1))
+            z = torch.zeros(m_flat.shape[1])
+            m_out = ~torch.reshape(torch.all(m_flat==z,dim=1),(m.shape[0],m.shape[1]))
+
+        m_out= m_out.type(torch.FloatTensor)
+        out_mask.append(m_out)
+
+    return out_mask
+
+
