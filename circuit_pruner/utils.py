@@ -159,6 +159,27 @@ def get_model_filterids(model):
     return out
 
 
+def filterid_2_perlayerid(filterid,model,imgnode_names = ['r','b','g']):    #takes in node unique id outputs tuple of layer and within layer id
+	layer_nodes = get_model_filterids(model)
+	if isinstance(filterid,str):
+		if not filterid.isnumeric():
+			layer = 'img'
+			layer_name='img'
+			within_layer_id = imgnode_names.index(filterid)
+			return layer,within_layer_id, layer_name
+	filterid = int(filterid)
+	total= 0
+	for i in range(len(layer_nodes)):
+		total += len(layer_nodes[i][1])
+		if total > filterid:
+			layer = i
+			layer_name = layer_nodes[i][0]
+			within_layer_id = layer_nodes[i][1].index(filterid)
+			break
+	#layer = nodes_df[nodes_df['category']=='overall'][nodes_df['node_num'] == nodeid]['layer'].item()
+	#within_layer_id = nodes_df[nodes_df['category']=='overall'][nodes_df['node_num'] == nodeid]['node_num_by_layer'].item()
+	return layer,within_layer_id,layer_name
+
 	
 #return list of names for conv modules based on their simple order, first conv is 'conv1', then 'conv2' etc. 
 def get_conv_simple_names(model):

@@ -23,196 +23,215 @@ import base64
 
 
 
-def circuit_2_2d_circuit_diagram(circuit,mask,orig_model,ranks,num_hoverpoints=4,use_img_nodes=False,normed_ranks=True):
-    
-    #kernels
-    kernels = get_kernels_Conv2d_modules(orig_model)
-    kernel_posneg = gen_kernel_posneg(kernels)
-    kernel_colors = posneg_to_rgb(kernel_posneg)
-    
-    
-    #spacing
-    layer_offset = 5
-    vert_offset = 1
-    
-    #naming
-    layer_nodes = get_model_filterids(orig_model)
-    
-    
-    #dataframes
-    edge_df = gen_circuit_model_mapping_df(orig_model,mask,ranks,version = 'edges')
-    node_df = gen_circuit_model_mapping_df(orig_model,mask,ranks,version = 'nodes')
-    
-    #ranks
-    if normed_ranks:
-        rank_type = 'norm_rank'
-    else:
-        rank_type = 'rank'
-    
-    
-    #img nodes
-    if use_img_nodes:
-        imgnode_positions = {'X':[-layer_offset,-layer_offset,-layer_offset],'Y':[2,0,-2]}
+def circuit_2_2d_circuit_diagram(circuit,mask,orig_model,ranks,num_hoverpoints=4,use_img_nodes=False,normed_ranks=True,edge_df=None,node_df=None):
+	
+	#kernels
+	kernels = get_kernels_Conv2d_modules(orig_model)
+	kernel_posneg = gen_kernel_posneg(kernels)
+	kernel_colors = posneg_to_rgb(kernel_posneg)
+	
+	
+	#spacing
+	layer_offset = 5
+	vert_offset = 1
+	
+	#naming
+	layer_nodes = get_model_filterids(orig_model)
+	
+	
+	#dataframes
+	if edge_df is None:
+		edge_df = gen_circuit_model_mapping_df(orig_model,mask,ranks,version = 'edges')
+	if node_df is None:
+		node_df = gen_circuit_model_mapping_df(orig_model,mask,ranks,version = 'nodes')
+	
+	#imgnodes
+	if len(edge_df.loc[edge_df['layer']==0]['in_channel'].unique()) == 3:
+		imgnode_names = ['r','g','b']
+	else:
+		imgnode_names = ['gs']
 
-        imgnode_trace=go.Scatter(x=imgnode_positions['X'],
-               y=imgnode_positions['Y'],
-               mode='markers',
-               name='image channels',
-               marker=dict(symbol='square',
-                             size=8,
-                             opacity=.99,
-                             color=['rgba(255,0,0,.7)', 'rgba(0,255,0,.7)', 'rgba(0,0,255,.7)'],
-                             #colorscale='Viridis',
-                             line=dict(color='rgb(50,50,50)', width=.5)
-                             ),
-               text=['r', 'g', 'b'],
-               hoverinfo='text'
-               )
+	#ranks
+	if normed_ranks:
+		rank_type = 'norm_rank'
+	else:
+		rank_type = 'rank'
+	
+	
+	#img nodes
+	if use_img_nodes:
+		if len(imgnode_names) == 3:
+			imgnode_positions = {'X':[-layer_offset,-layer_offset,-layer_offset],'Y':[2,0,-2]}
+			imgnode_color = ['rgba(255,0,0,.7)', 'rgba(0,255,0,.7)', 'rgba(0,0,255,.7)']
+		else:
+			imgnode_positions = {'X':[-layer_offset],'Y':[0]}
+			imgnode_color = ['rgba(100,100,100,.7)']
 
-        imgnode_traces = [imgnode_trace]
+		imgnode_trace=go.Scatter(x=imgnode_positions['X'],
+			   y=imgnode_positions['Y'],
+			   mode='markers',
+			   name='image channels',
+			   marker=dict(symbol='square',
+							 size=8,
+							 opacity=.99,
+							 color=['rgba(255,0,0,.7)', 'rgba(0,255,0,.7)', 'rgba(0,0,255,.7)'],
+							 #colorscale='Viridis',
+							 line=dict(color=imgnode_color, width=.5)
+							 ),
+			   text=['r', 'g', 'b'],
+			   hoverinfo='text'
+			   )
 
-    #NODE TRACES
-    pos_dict_nodes = {}
-    node_traces = []
-    for layer in list(node_df['layer'].unique()):
-        #add nodes
+		imgnode_traces = [imgnode_trace]
 
-        within_layer_ids = list(node_df.loc[node_df['layer']==layer]['node_num_by_layer'])
-        scores = list(node_df.loc[node_df['layer']==layer][rank_type])
-        ids = list(node_df.loc[node_df['layer']==layer]['node_num'])
-        #print(np.dstack((ids,within_layer_ids,scores)).shape)
-        #print(np.dstack((ids,within_layer_ids,scores)))
-        # hovertext = ['<b>%{id}</b>' +
-        # 			'<br><i>layerwise ID</i>: %{within_layer_id}'+
-        # 			'<br><i>Score</i>: %{score}<br>'
-        # 			 for id, within_layer_id, score in
-        # 			 zip(ids, within_layer_ids, scores)]
-        #print(hovertext) 
-        x_positions = []
-        y_positions = []
-        y_adjustment = (len(within_layer_ids)-1)/2*vert_offset
-        for i in range(len(within_layer_ids)):
-            x_positions.append(layer*layer_offset)
-            y_positions.append(i*vert_offset-y_adjustment)
-        node_trace=go.Scatter(x=x_positions,
-                   y=y_positions,
-                   mode='markers',
-                   name=list(node_df.loc[node_df['layer']==layer]['layer_name'].unique())[0],
-                   marker=dict(symbol='circle',
-                                 size=6,
-                                 color='rgba(50,50,50,0)',
-                                 opacity=0,
-                                 #colorscale='Viridis',
-                                 line=dict(color='rgba(50,50,50,0)', width=.5)
-                                 ),
-                   text=ids,
-                   #customdata = np.dstack((ids,within_layer_ids,scores)),
-                   customdata = np.stack((ids,within_layer_ids,scores),axis=-1),
-                   hovertemplate =	'<b>%{customdata[0]}</b>' +
-                            '<br><i>layerwise ID</i>: %{customdata[1]}'+
-                            '<br><i>Score</i>: %{customdata[2]:.3f}<br>'
-                   #hoverinfo='text'
-                   )
+	#NODE TRACES
+	pos_dict_nodes = {}
+	node_traces = []
+	for layer in list(node_df['layer'].unique()):
+		#add nodes
 
-        node_traces.append(node_trace)
-        pos_dict_nodes[layer] = {'name':ids,'X':x_positions,'Y':y_positions}
-     
-    
-    #EDGE TRACES
-    edge_traces = []
-    pos_dict_edges = {}
-    for layer in list(edge_df['layer'].unique()):  
-        
-        if layer == 0 and not use_img_nodes:
-            continue
-            
-        pos_dict_edges[layer] = {'name':[],'X':[],'Y':[]}
-        legendgroup = layernum2name(layer ,title = 'edges')
+		within_layer_ids = list(node_df.loc[node_df['layer']==layer]['node_num_by_layer'])
+		scores = list(node_df.loc[node_df['layer']==layer][rank_type])
+		ids = list(node_df.loc[node_df['layer']==layer]['node_num'])
+		#print(np.dstack((ids,within_layer_ids,scores)).shape)
+		#print(np.dstack((ids,within_layer_ids,scores)))
+		# hovertext = ['<b>%{id}</b>' +
+		# 			'<br><i>layerwise ID</i>: %{within_layer_id}'+
+		# 			'<br><i>Score</i>: %{score}<br>'
+		# 			 for id, within_layer_id, score in
+		# 			 zip(ids, within_layer_ids, scores)]
+		#print(hovertext) 
+		x_positions = []
+		y_positions = []
+		y_adjustment = (len(within_layer_ids)-1)/2*vert_offset
+		for i in range(len(within_layer_ids)):
+			x_positions.append(layer*layer_offset)
+			y_positions.append(i*vert_offset-y_adjustment)
+		node_trace=go.Scatter(x=x_positions,
+				   y=y_positions,
+				   mode='markers',
+				   name=list(node_df.loc[node_df['layer']==layer]['layer_name'].unique())[0],
+				   marker=dict(symbol='circle',
+								 size=6,
+								 color='rgba(50,50,50,0)',
+								 opacity=0,
+								 #colorscale='Viridis',
+								 line=dict(color='rgba(50,50,50,0)', width=.5)
+								 ),
+				   text=ids,
+				   #customdata = np.dstack((ids,within_layer_ids,scores)),
+				   customdata = np.stack((ids,within_layer_ids,scores),axis=-1),
+				   hovertemplate =	'<b>%{customdata[0]}</b>' +
+							'<br><i>layerwise ID</i>: %{customdata[1]}'+
+							'<br><i>Score</i>: %{customdata[2]:.3f}<br>'
+				   #hoverinfo='text'
+				   )
 
-        #edge_widths = []
-        #names = []
-        #colors = []
-        for row in edge_df.loc[edge_df['layer']==layer].itertuples():
-            showlegend = False
-            if getattr(row, rank_type) > .999:
-                showlegend = True
-            #positions
-            edge_positions = {'X':[],'Y':[]}
-            for dim in ['X','Y']:
-                end_pos = pos_dict_nodes[layer][dim][pos_dict_nodes[layer]['name'].index(layer_nodes[layer][1][row.out_channel])]
-                if layer != 0:
-                    start_pos = pos_dict_nodes[layer-1][dim][pos_dict_nodes[layer-1]['name'].index(layer_nodes[layer-1][1][row.in_channel])]
-                else:
-                    start_pos = imgnode_positions[dim][row.in_channel]
+		node_traces.append(node_trace)
+		pos_dict_nodes[layer] = {'name':ids,'X':x_positions,'Y':y_positions}
+	 
+	
+	#EDGE TRACES
+	edge_traces = []
+	pos_dict_edges = {}
+	for layer in list(edge_df['layer'].unique()):  
+		
+		if layer == 0 and not use_img_nodes:
+			continue
+			
+		pos_dict_edges[layer] = {'name':[],'X':[],'Y':[]}
+		legendgroup = layernum2name(layer ,title = 'edges')
 
-                step = (end_pos-start_pos)/(num_hoverpoints+1)
-                points = [start_pos]
-                for i in range(1,num_hoverpoints+1):
-                    points.append(start_pos+i*step)
-                points.append(end_pos)
-                edge_positions[dim]=points
-            #widths
-            edge_width = circuit_edge_width_scaling(getattr(row, rank_type))
-            #edge_widths.append(edge_width_scaling(getattr(row, rank_type)))
-            #names
-            out_node = layer_nodes[row.layer][1][row.out_channel]
-            if row.layer != 0:
-                in_node = layer_nodes[row.layer-1][1][row.in_channel]
-            else:
-                in_node = ['r','g','b'][row.in_channel]
-            #names.append(str(in_node)+'-'+str(out_node))
-            edge_name = str(in_node)+'-'+str(out_node)
-            #color
-            #colors.append(color_vec_2_str(kernel_colors[int(layer)][int(row.out_channel)][int(row.in_channel)]))
-            edge_color = color_vec_2_str(kernel_colors[int(layer)][int(row.out_channel)][int(row.in_channel)])
-            edge_trace=go.Scatter(x=edge_positions['X'],
-                            y=edge_positions['Y'],
-                            legendgroup=legendgroup,
-                            showlegend=showlegend,
-                            name=layer_nodes[layer][0],
-                            mode='lines',
-                            #line=dict(color=edge_colors_dict[layer], width=1.5),
-                            line=dict(color=edge_color, width=edge_width),
-                            text = edge_name,
-                            hoverinfo='text'
-                            )
-            edge_traces.append(edge_trace)
-            pos_dict_edges[layer]['name'].append(edge_name)
-            pos_dict_edges[layer]['X'].append(edge_positions['X'])
-            pos_dict_edges[layer]['Y'].append(edge_positions['Y']) 
-            
-    #trace just for storing data
-    misc_trace=go.Scatter(x=[-layer_offset-.5],
-                y=[-2.5],
-                showlegend=False,
-                name='misc',
-                mode='markers',
-                marker=dict(symbol='circle',
-                 size=6,
-                 color='rgba(255,255,255,0)',
-                 opacity=0,
-                 #colorscale='Viridis',
-                 line=dict(color='rgba(255,255,255,0)', width=.5)
-                 ),
+		#edge_widths = []
+		#names = []
+		#colors = []
+		for row in edge_df.loc[edge_df['layer']==layer].itertuples():
+			showlegend = False
+			if getattr(row, rank_type) > .999:
+				showlegend = True
+			#positions
+			edge_positions = {'X':[],'Y':[]}
+			for dim in ['X','Y']:
+				end_pos = pos_dict_nodes[layer][dim][pos_dict_nodes[layer]['name'].index(layer_nodes[layer][1][row.out_channel])]
+				if layer != 0:
+					start_pos = pos_dict_nodes[layer-1][dim][pos_dict_nodes[layer-1]['name'].index(layer_nodes[layer-1][1][row.in_channel])]
+				else:
+					start_pos = imgnode_positions[dim][row.in_channel]
 
-                text = 'full', #text info storing full or partial graph
-                hoverinfo='skip'
-                )
-    
-    combined_traces = node_traces+edge_traces+[misc_trace]
-    if use_img_nodes:
-        combined_traces = combined_traces+imgnode_traces
-        
-    return combined_traces, pos_dict_nodes, pos_dict_edges
+				step = (end_pos-start_pos)/(num_hoverpoints+1)
+				points = [start_pos]
+				for i in range(1,num_hoverpoints+1):
+					points.append(start_pos+i*step)
+				points.append(end_pos)
+				edge_positions[dim]=points
+			#widths
+			edge_width = circuit_edge_width_scaling(getattr(row, rank_type))
+			#edge_widths.append(edge_width_scaling(getattr(row, rank_type)))
+			#names
+			out_node = layer_nodes[row.layer][1][row.out_channel]
+			if row.layer != 0:
+				in_node = layer_nodes[row.layer-1][1][row.in_channel]
+			else:
+				in_node = ['r','g','b'][row.in_channel]
+			#names.append(str(in_node)+'-'+str(out_node))
+			edge_name = str(in_node)+'-'+str(out_node)
+			#color
+			#colors.append(color_vec_2_str(kernel_colors[int(layer)][int(row.out_channel)][int(row.in_channel)]))
+			edge_color = color_vec_2_str(kernel_colors[int(layer)][int(row.out_channel)][int(row.in_channel)])
+			edge_trace=go.Scatter(x=edge_positions['X'],
+							y=edge_positions['Y'],
+							legendgroup=legendgroup,
+							showlegend=showlegend,
+							name=layer_nodes[layer][0],
+							mode='lines',
+							#line=dict(color=edge_colors_dict[layer], width=1.5),
+							line=dict(color=edge_color, width=edge_width),
+							text = edge_name,
+							hoverinfo='text'
+							)
+			edge_traces.append(edge_trace)
+			pos_dict_edges[layer]['name'].append(edge_name)
+			pos_dict_edges[layer]['X'].append(edge_positions['X'])
+			pos_dict_edges[layer]['Y'].append(edge_positions['Y']) 
+			
+	#trace just for storing data
+	misc_trace=go.Scatter(x=[-layer_offset-.5],
+				y=[-2.5],
+				showlegend=False,
+				name='misc',
+				mode='markers',
+				marker=dict(symbol='circle',
+				 size=6,
+				 color='rgba(255,255,255,0)',
+				 opacity=0,
+				 #colorscale='Viridis',
+				 line=dict(color='rgba(255,255,255,0)', width=.5)
+				 ),
+
+				text = 'full', #text info storing full or partial graph
+				hoverinfo='skip'
+				)
+	
+	combined_traces = node_traces+edge_traces+[misc_trace]
+	if use_img_nodes:
+		combined_traces = combined_traces+imgnode_traces
+		
+	return combined_traces, pos_dict_nodes, pos_dict_edges
 
 
 
 
 
-def gen_kernel_img(edge_name,layer,kernels,viz_folder):
-	in_channel = edge_name.split('-')[0]
-	out_channel = edge_name.split('-')[1]
-	kernel = kernels[layer][out_channel][in_channel].detach().cpu().numpy()
+def gen_kernel_img(edge_name,model,viz_folder):
+	kernels = get_model_conv_weights(model)
+	
+	in_filterid = int(edge_name.split('-')[0])
+	out_filterid = int(edge_name.split('-')[1])
+
+	in_layer,in_channel,in_layer_name=filterid_2_perlayerid(in_filterid,model)
+	out_layer,out_channel,out_layer_name=filterid_2_perlayerid(out_filterid,model)
+
+	kernel = kernels[out_layer][out_channel][in_channel].detach().cpu().numpy()
 	if kernel is not None:
 		kernel_layout = go.Layout(
 			width=400,
