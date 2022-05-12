@@ -3,6 +3,7 @@ import numpy as np
 #functions for 'extracting' a circuit from a masked model to a new neural network
 
 import torch
+import torch.nn as nn
 from copy import deepcopy
 from circuit_pruner.force import *
 
@@ -73,6 +74,9 @@ def mask_2_effective_mask(mask):
 		for j in range(effective_mask[i].shape[0]):
 			if not torch.all(torch.eq(effective_mask[i][j],torch.zeros(effective_mask[i][0].shape))):
 				prev_filter_mask[j] = 1
+
+
+
 
 	#reverse direction feature to pixel connectivity check
 	prev_filter_mask = None
@@ -222,10 +226,47 @@ parameters with a score of zero.')
 	return mask,cum_sal
 
 
+def fill_zeros_in_kernel_mask(masked_model,mask,k):
+	kept = 0
+	for l in mask:
+		kept += l.sum()
+	to_add = int(k-kept)
+
+	added=0
+	start = False
+	mask_l = -1
+	#for l in reversed(masked_model.modules()):
+	for name, l in reversed(masked_model._modules.items()):
+		if isinstance(l, nn.Conv2d):
+			if l.last_layer:  #all params potentially relevant
+				start = True
+			if not start:
+				continue
 
 
-def dissected_model_ranks_2_circuit_model(layer_ranks,sparsity,model,feature_targets,device,method='actxgrad',structure='edges',use_effective_mask=True,rank_field='image'):
-	
+			kernel_sums = torch.sum(torch.abs(l.weight), (2,3), keepdim=False)
+			valid_positions = (kernel_sums != 0).cpu()
+			mask_inv = mask[mask_l] < 1
+			possible_flips = valid_positions*mask_inv
+			possible_flip_indices = possible_flips.nonzero()
+			if to_add - added >= possible_flip_indices.shape[0]:
+				#add everything back
+				mask[mask_l] = valid_positions.type(torch.FloatTensor)
+				added += int(valid_positions.sum() - mask[mask_l].sum())
+				mask_l-=1
+			else:
+				for i in range(int(to_add - added)):
+					mask[mask_l][possible_flip_indices[i][0],possible_flip_indices[i][1]] = 1.
+				break
+
+	return mask
+
+
+def model_ranks_2_circuit_model(layer_ranks,sparsity,model,feature_targets,device,method='actxgrad',structure='edges',use_effective_mask=True,rank_field='image',zero_zeros=False):
+	if structure== 'kernels': structure='edges'
+	if structure== 'filters': structure='nodes'
+
+
 	rank_list = []
 
 	if isinstance(layer_ranks,list):
@@ -236,8 +277,14 @@ def dissected_model_ranks_2_circuit_model(layer_ranks,sparsity,model,feature_tar
 			layer_ranks = layer_ranks['ranks']
 
 		for l in range(len(layer_ranks[structure][method])):
-			if len(layer_ranks[structure][method][l][1].nonzero()[1])>0:
-				rank_list.append(torch.tensor(layer_ranks[structure][method][l][1]).to('cpu'))
+			if structure == 'edges':
+				if len(layer_ranks[structure][method][l][1].nonzero()[1])>0:
+					rank_list.append(torch.tensor(layer_ranks[structure][method][l][1]).to('cpu'))
+			else:
+				if len(layer_ranks[structure][method][l][1].nonzero()[0])>0:
+					rank_list.append(torch.tensor(layer_ranks[structure][method][l][1]).to('cpu'))
+
+
 
 	#model
 	model.to('cpu').eval()
@@ -300,12 +347,14 @@ def dissected_model_ranks_2_circuit_model(layer_ranks,sparsity,model,feature_tar
 	#generate mask
 	mask,cum_sal = mask_from_sparsity(rank_list,k) 
 	
+	if not zero_zeros:
+		mask = fill_zeros_in_kernel_mask(masked_model,mask,k)
 
 
 	orig_mask_sum = 0
 	for l in mask:
 		orig_mask_sum += int(torch.sum(l))
-	print(orig_mask_sum)
+
 
 	if structure is not 'weights':
 		expanded_mask = expand_structured_mask(mask,masked_model) #this weight mask will get applied to the network on the next iteration
@@ -317,21 +366,24 @@ def dissected_model_ranks_2_circuit_model(layer_ranks,sparsity,model,feature_tar
 
 
 	#apply mask
-	if structure == 'filters':
+	if structure == 'nodes':
 		reset_masks_in_net(masked_model)
 		apply_filter_mask(masked_model,mask) #different than masking weights, because it also masks biases
 	else:
 		apply_mask(masked_model,expanded_mask) 
 
 	if use_effective_mask:
-		effect_mask = mask_2_effective_mask(mask)
+		#import pdb;pdb.set_trace()
+		effect_mask = mask_2_effective_mask(expanded_mask)
+		structured_effect_mask = structured_mask_from_mask(effect_mask, structure = structure)
+		#import pdb; pdb.set_trace()
 		#effect_mask = kernel_mask_2_effective_kernel_mask(mask)
 
 		#check for TOTAL COLLAPSE (there is no path to the target feature, the extracted circuit is literally nothing)
 
 		total_collapse = False
 		effective_sum  = 0
-		for l in effect_mask:
+		for l in structured_effect_mask:
 			effective_sum += int(torch.sum(l))
 		print('effective_sparsity: %s'%str(effective_sum/total_params))
 		if effective_sum == 0:
@@ -352,12 +404,24 @@ def dissected_model_ranks_2_circuit_model(layer_ranks,sparsity,model,feature_tar
 
 
 
+def fill_partial_filters_in_mask(mask):
+	#This is useful for the circuit diagrams for first layer masks
+	# it takes the filters with some masked kernels and unmasks them,
+	#in the first layer partial filters like this just mess with color
+	# without really simplifying
+
+	for i in range(mask.shape[0]):
+
+		if mask[i].sum() != 0:
+			mask[i] = torch.ones(mask[i].shape)		
+
+	return mask	
 
 
 
 
 
-# def dissected_model_ranks_2_circuit_model(layer_ranks,sparsity,model,feature_targets,device,method='actxgrad',structure='edges',use_effective_mask=True,rank_field='image'):
+# def model_ranks_2_circuit_model(layer_ranks,sparsity,model,feature_targets,device,method='actxgrad',structure='edges',use_effective_mask=True,rank_field='image'):
 	
 # 	rank_list = []
 	
@@ -460,132 +524,275 @@ def dissected_model_ranks_2_circuit_model(layer_ranks,sparsity,model,feature_tar
 # 	if not total_collapse:
 # 		return pruned_model,effect_mask
 
-def get_preservation_at_sparsities(model,ranks,feature_targets,dataloader,sparsities,device,rank_field='image',metric='avg_diff'):
+def get_preservation_at_sparsities(model,ranks,feature_targets,dataloader,sparsities,device,rank_field='image',metric='mean_normed_diff',structure='kernels',print_avg_acts=True):
 
-    scores = {}
-    
-    print('original')
-    #get original model activations
-    model.to('cpu').eval()
-    orig_model = deepcopy(model)
-    orig_model = orig_model.to(device).eval()
-    setup_net_for_circuit_prune(orig_model, feature_targets=feature_targets,save_target_activations=True)
-    
-    #pass data
-    iter_dataloader = iter(dataloader)
-    iters = len(iter_dataloader)
-    for it in range(iters):
-        inputs, target = next(iter_dataloader)
-        inputs = inputs.to(device)
-        try:
-            output = orig_model(inputs)
-        except TargetReached:
-            pass
-        
-    #fetch activations
-    orig_acts_all = get_saved_target_activations_from_net(orig_model)
+	scores = {} 
+	
+	print('original')
+	#get original model activations
+	model.to('cpu').eval()
+	orig_model = deepcopy(model)
+	orig_model = orig_model.to(device).eval()
+	setup_net_for_circuit_prune(orig_model, feature_targets=feature_targets,save_target_activations=True)
+	
+	orig_acts_all = None
+	#pass data
+	iter_dataloader = iter(dataloader)
+	iters = len(iter_dataloader)
+	for it in range(iters):
+		inputs, target = next(iter_dataloader)
+		inputs = inputs.to(device)
+		try:
+			output = orig_model(inputs)
+		except TargetReached:
+			pass
+		batch_acts_all = get_saved_target_activations_from_net(orig_model)
+		if orig_acts_all is None:
+			orig_acts_all = batch_acts_all
+		else:
+			for feature in orig_acts_all.keys():
+				orig_acts_all[feature] = np.concatenate((orig_acts_all[feature],batch_acts_all[feature]))
 
-    
+		
+	#fetch activations
+	#orig_acts_all = get_saved_target_activations_from_net(orig_model)
+	orig_feature = list(orig_acts_all.keys())[0]
 
 
-    orig_acts = {}
-    for feature in orig_acts_all.keys():
-        
-        scores[feature] = []
-        orig_acts_all[feature] = torch.from_numpy(orig_acts_all[feature])
-        
-        
-        if rank_field == 'image':
-            orig_acts[feature] = orig_acts_all[feature].mean(dim=(1, 2))
-        elif rank_field in ['max','orig_max']:
-            orig_acts[feature] = orig_acts_all[feature].view(orig_acts_all[feature].size(0), orig_acts_all[feature].size(1)*orig_acts_all[feature].size(2)).max(dim=-1).values
-        elif rank_field == 'min':
-            orig_acts[feature] = orig_acts_all[feature].view(orig_acts_all[feature].size(0), orig_acts_all[feature].size(1)*orig_acts_all[feature].size(2)).min(dim=-1).values
-        elif isinstance(rank_field,list):
-            orig_acts[feature] = []
-            for i in range(len(rank_field)):
-                orig_acts[feature].append(orig_acts_all[feature][i,int(rank_field[i][0]),int(rank_field[i][1])])
-            orig_acts[feature] = torch.tensor(orig_acts[feature])
-            
-        orig_acts[feature] = orig_acts[feature].detach().cpu().numpy().astype('float32')
 
-        
-    #get max activation indices
-    if rank_field == 'orig_max':
-        rank_field = {}
-        for feature in orig_acts_all.keys():
-            rank_field[feature] = []
-            for i in range(orig_acts_all[feature].shape[0]):
-                rank_field[feature].append(np.unravel_index(orig_acts_all[feature][i].argmax(), orig_acts_all[feature][i].shape))
-    
-    print(orig_acts)
-    print(rank_field)
-   
-    for sparsity in sparsities:
-        print(sparsity)
-        #extract circuit
-        circuit, mask = dissected_model_ranks_2_circuit_model(ranks,sparsity,model,feature_targets,device)
-        circuit.to(device).eval()
-        
-        #get activations from ciruit
-        setup_net_for_circuit_prune(circuit, feature_targets=feature_targets,save_target_activations=True)
-        
-        #pass data
-        iter_dataloader = iter(dataloader)
-        iters = len(iter_dataloader)
-        for it in range(iters):
-            inputs, target = next(iter_dataloader)
-            inputs = inputs.to(device)
-            try:
-                output = circuit(inputs)
-            except TargetReached:
-                pass
-        
-        #fetch activations
-        acts_all = get_saved_target_activations_from_net(circuit)
-        acts = {}
-        for feature in acts_all.keys():
-            
-            acts_all[feature] = torch.from_numpy(acts_all[feature])
-            
-            if rank_field == 'image':
-                acts[feature] = acts_all[feature].mean(dim=(1, 2))
-            elif rank_field in ['max','orig_max']:
-                acts[feature] = acts_all[feature].view(acts_all[feature].size(0), acts_all[feature].size(1)*acts_all[feature].size(2)).max(dim=-1).values
-            elif rank_field == 'min':
-                acts[feature] = acts_all[feature].view(acts_all[feature].size(0), acts_all[feature].size(1)*acts_all[feature].size(2)).min(dim=-1).values
-            elif isinstance(rank_field,list):
-                acts[feature] = []
-                for i in range(len(rank_field)):
-                    acts[feature].append(acts_all[feature][i,int(rank_field[i][0]),int(rank_field[i][1])])
-                acts[feature] = torch.tensor(acts[feature])
-            elif isinstance(rank_field,dict):
-                acts[feature] = []
-                for i in range(len(rank_field[feature])):
-                    acts[feature].append(acts_all[feature][i,int(rank_field[feature][i][0]),int(rank_field[feature][i][1])])
-                acts[feature] = torch.tensor(acts[feature])
-                
-            acts[feature] = acts[feature].detach().cpu().numpy().astype('float32')
-            
-            print(acts)
-        
-            #caculate score (how close is circuit activation to original?)
-            if metric == 'spearman':
-                score = spearmanr(orig_acts[feature],acts[feature]).correlation
-                if score is np.nan:
-                    score = 0.
-            elif metric == 'pearson':
-                score = pearsonr(orig_acts[feature],acts[feature])[0]
-                if score is np.nan:
-                    score = 0.
-            elif metric == 'avg_diff':
-                score =  np.mean(acts[feature]-orig_acts[feature])
-            elif metric == 'normed_diff':
-                norm_factor = np.std(orig_acts[feature])
-                score = np.mean(acts[feature]-orig_acts[feature])/norm_factor
-            
-            print('SCORE: %s'%str(score))
-            scores[feature].append(score)
+	orig_acts = {}
+	for feature in orig_acts_all.keys():
+		
+		scores[feature] = {'spearman':[],
+						   'pearson':[],
+						   'avg_diff':[],
+						   'avg_abs_diff':[],
+			 			   'std_normed_diff':[],
+						   'mean_normed_diff':[],
+						   'std_normed_abs_diff':[]}
 
-    return scores
+		orig_acts_all[feature] = torch.from_numpy(orig_acts_all[feature])
+		
 
+		
+		if rank_field == 'image':
+			orig_acts[feature] = orig_acts_all[feature].mean(dim=(1, 2))
+		elif rank_field in ['max','orig_max']:
+			orig_acts[feature] = orig_acts_all[feature].view(orig_acts_all[feature].size(0), orig_acts_all[feature].size(1)*orig_acts_all[feature].size(2)).max(dim=-1).values
+		elif rank_field == 'min':
+			orig_acts[feature] = orig_acts_all[feature].view(orig_acts_all[feature].size(0), orig_acts_all[feature].size(1)*orig_acts_all[feature].size(2)).min(dim=-1).values
+		elif isinstance(rank_field,list):
+			orig_acts[feature] = []
+			if isinstance(rank_field[0],list):
+				for i in range(len(rank_field)):
+					orig_acts[feature].append(orig_acts_all[feature][i,int(rank_field[i][0]),int(rank_field[i][1])])
+			else:
+				for i in range(orig_acts_all[feature].shape[0]):
+					orig_acts[feature].append(orig_acts_all[feature][i,int(rank_field[0]),int(rank_field[1])])
+
+			orig_acts[feature] = torch.tensor(orig_acts[feature])
+			
+
+		orig_acts[feature] = orig_acts[feature].detach().cpu().numpy().astype('float32')
+
+		if print_avg_acts:
+			print('average orig acts:')
+			print('feature %s: %s'%(feature,float(np.mean(orig_acts[feature]))))
+
+
+	#get max activation indices
+	if rank_field == 'orig_max':
+		rank_field = {}
+		for feature in orig_acts_all.keys():
+			rank_field[feature] = []
+			for i in range(orig_acts_all[feature].shape[0]):
+				rank_field[feature].append(list(np.unravel_index(orig_acts_all[feature][i].argmax(), orig_acts_all[feature][i].shape)))
+	
+	#print(orig_acts)
+	#print(rank_field)
+	circuit_feature_targets = {list(feature_targets.keys())[0]:[0]}
+
+	for sparsity in sparsities:
+
+		print('Target Sparsity: %s'%str(sparsity))
+		#extract circuit
+		circuit, mask = model_ranks_2_circuit_model(ranks,sparsity,model,feature_targets,device,structure=structure)
+		
+		if circuit is not None:   #we might have total collapse
+			
+			circuit.to(device).eval()
+			
+			#live inputs, the pruned model might not have inputs leading to all 3 input channels, so we need to check
+			#for those so we can get rid of those channels of the input images
+			live_input_channels = []
+
+			for i in range(mask[0][0].shape[0]):
+				tot = torch.sum(mask[0][:,i])
+				if tot > 0:
+					live_input_channels.append(i)
+
+
+
+			#get activations from ciruit
+			setup_net_for_circuit_prune(circuit, feature_targets=circuit_feature_targets,save_target_activations=True)
+
+			acts_all = None
+			#pass data
+			iter_dataloader = iter(dataloader)
+			iters = len(iter_dataloader)
+			for it in range(iters):
+				inputs, target = next(iter_dataloader)
+				inputs = inputs.to(device)
+				inputs = inputs[:,live_input_channels]
+				try:
+					output = circuit(inputs)
+				except TargetReached:
+					pass
+
+				batch_acts_all = get_saved_target_activations_from_net(circuit)
+				if acts_all is None:
+					acts_all = batch_acts_all
+				else:
+					for feature in acts_all.keys():
+						acts_all[feature] = np.concatenate((acts_all[feature],batch_acts_all[feature]))
+
+
+
+
+			#fetch activations
+			#acts_all = get_saved_target_activations_from_net(circuit)
+			acts = {}
+			for feature in acts_all.keys():
+
+				acts_all[feature] = torch.from_numpy(acts_all[feature])
+
+				if rank_field == 'image':
+					acts[feature] = acts_all[feature].mean(dim=(1, 2))
+				elif rank_field in ['max','orig_max']:
+					acts[feature] = acts_all[feature].view(acts_all[feature].size(0), acts_all[feature].size(1)*acts_all[feature].size(2)).max(dim=-1).values
+				elif rank_field == 'min':
+					acts[feature] = acts_all[feature].view(acts_all[feature].size(0), acts_all[feature].size(1)*acts_all[feature].size(2)).min(dim=-1).values
+				elif isinstance(rank_field,list):
+					acts[feature] = []
+					if isinstance(rank_field[0],list):
+						for i in range(len(rank_field)):
+							acts[feature].append(acts_all[feature][i,int(rank_field[i][0]),int(rank_field[i][1])])
+					else:
+						for i in range(acts_all[feature].shape[0]):
+							acts[feature].append(acts_all[feature][i,int(rank_field[0]),int(rank_field[1])])
+					acts[feature] = torch.tensor(acts[feature])
+
+
+				elif isinstance(rank_field,dict):
+					acts[feature] = []
+					for i in range(len(rank_field[orig_feature])):
+						acts[feature].append(acts_all[feature][i,int(rank_field[orig_feature][i][0]),int(rank_field[orig_feature][i][1])])
+					acts[feature] = torch.tensor(acts[feature])
+
+				acts[feature] = acts[feature].detach().cpu().numpy().astype('float32')
+
+				if print_avg_acts:
+					print('average circuit acts:')
+					print('feature %s: %s'%(feature,float(np.mean(acts[feature]))))
+				#caculate score (how close is circuit activation to original?)
+
+				if metric == 'spearman' or metric =='all':
+					try:
+						score = spearmanr(orig_acts[orig_feature],acts[feature]).correlation
+						if score is np.nan:
+							score = 0.
+						scores[orig_feature]['spearman'].append(score)
+					except:
+						if metric == 'all':
+							pass
+
+				if metric == 'pearson' or metric =='all':
+					try:
+						score = pearsonr(orig_acts[orig_feature],acts[feature])[0]
+						if score is np.nan:
+							score = 0.
+						scores[orig_feature]['pearson'].append(score)
+					except:
+						if metric == 'all':
+							pass
+
+				if metric == 'avg_diff' or metric =='all':
+					try:
+						score =  np.mean(acts[feature]-orig_acts[orig_feature])
+						scores[orig_feature]['avg_diff'].append(score)
+					except:
+						if metric == 'all':
+							pass
+
+				if metric == 'avg_abs_diff' or metric =='all':
+					try:
+						score =  np.mean(np.abs(acts[feature]-orig_acts[orig_feature]))
+						scores[orig_feature]['avg_abs_diff'].append(score)
+					except:
+						if metric == 'all':
+							pass
+
+				if metric == 'std_normed_diff' or metric =='all':
+					try:
+						norm_factor = np.std(orig_acts[orig_feature])
+						score = np.mean(acts[feature]-orig_acts[orig_feature])/norm_factor
+						scores[orig_feature]['std_normed_diff'].append(score)
+					except:
+						if metric == 'all':
+							pass
+					
+
+				if metric == 'mean_normed_diff' or metric =='all':
+					try:
+						norm_factor = np.abs(np.mean(orig_acts[orig_feature]))
+						score = np.mean(acts[feature]-orig_acts[orig_feature])/norm_factor
+						scores[orig_feature]['mean_normed_diff'].append(score)
+					except:
+						if metric == 'all':
+							pass
+
+				if metric == 'std_normed_abs_diff' or metric =='all':
+					try:
+						norm_factor = np.std(orig_acts[orig_feature])
+						score = np.mean(np.abs(acts[feature]-orig_acts[orig_feature]))/norm_factor
+						scores[orig_feature]['std_normed_abs_diff'].append(score)
+					except:
+						if metric == 'all':
+							pass
+
+				if metric != 'all':
+					print('SCORE: %s'%str(score))
+					print('\n')
+					
+
+			del circuit
+			del acts
+			torch.cuda.empty_cache()
+
+	return scores
+
+
+
+def zero_model_weights_with_mask(model,mask):
+	count = 0
+	def apply_mask(model,count=count):
+		if hasattr(model, "_modules"):
+			for name, layer in model._modules.items():
+
+				if layer is None:
+					# e.g. GoogLeNet's aux1 and aux2 layers
+					continue
+
+				if isinstance(layer, nn.Conv2d):
+					layer.weight = nn.Parameter(layer.weight*mask[count])
+					count += 1
+
+				if count >= len(mask):
+					break
+
+				apply_mask(layer,count=count)
+
+		   
+	apply_mask(model,count=count)
+
+	return model

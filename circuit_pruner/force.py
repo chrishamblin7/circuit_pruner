@@ -211,17 +211,20 @@ def circuit_prune_forward_conv2d(self, x):
 				self.feature_targets[feature_idx] = min_acts_target.mean()
 
 			elif isinstance(self.rank_field,list):
-				d = x.get_device()
-				if d == -1:
-					device='cpu'
+				if isinstance(self.rank_field[0],list):
+					d = x.get_device()
+					if d == -1:
+						device='cpu'
+					else:
+						device='cuda:'+str(d)
+					act_targets_sum = torch.FloatTensor(1).zero_().to(device) 
+					for i in range(len(self.rank_field)):
+						act_targets_sum += x[i,feature_idx,int(self.rank_field[i][0]),int(self.rank_field[i][1])]
 				else:
-					device='cuda:'+str(d)
-				act_targets_sum = torch.FloatTensor(1).zero_().to(device) 
-				for i in range(len(self.rank_field)):
-					act_targets_sum += x[i,feature_idx,int(self.rank_field[i][0]),int(self.rank_field[i][1])]
+					act_targets_sum = x[:,feature_idx,int(self.rank_field[0]),int(self.rank_field[1])].sum()
+					
+				self.feature_targets[feature_idx] = act_targets_sum/x.shape[0]
 
-				self.feature_targets[feature_idx] = act_targets_sum/len(self.rank_field)
-				
 
 			if self.save_target_activations:
 				self.target_activations[feature_idx] = x[:,feature_idx,:,:].data.to('cpu')
@@ -727,7 +730,7 @@ def expand_structured_mask(mask,net):
 
 
 
-def circuit_FORCE_pruning(model, dataloader, feature_targets = None,feature_targets_coefficients = None,keep_ratio=.1, T=10, use_abs_ranks=True, full_dataset = True, num_params_to_keep=None, device=None, structure='weights', rank_field = 'image', mask=None, setup_net=True, return_ranks = False):    #progressive skeletonization
+def circuit_FORCE_pruning(model, dataloader, feature_targets = None,feature_targets_coefficients = None,keep_ratio=.1, T=10, use_abs_ranks=True, full_dataset = True, num_params_to_keep=None, device=None, structure='kernels', rank_field = 'image', mask=None, setup_net=True, return_ranks = False):    #progressive skeletonization
 
 	
 	assert structure in ('weights','kernels','filters')
@@ -1056,43 +1059,43 @@ def kernel_mask_2_effective_kernel_mask(kernel_mask):
 
 
 def structured_mask_from_mask(mask, structure = 'kernels'):
-    
-    if structure == 'weights':
-        raise ValueError("to create a weight mask use the function circuit_pruner.force.expand_structured_mask")
-    if structure not in ['kernels','edges','filters','nodes']:
-        raise ValueError("Argument 'structure' must be in ['weights','kernels','edges','filters','nodes']")
+	
+	if structure == 'weights':
+		raise ValueError("to create a weight mask use the function circuit_pruner.force.expand_structured_mask")
+	if structure not in ['kernels','edges','filters','nodes']:
+		raise ValueError("Argument 'structure' must be in ['weights','kernels','edges','filters','nodes']")
 
 
 
-    if len(mask[0].shape) == 4:
-        in_structure = 'weights'
-    elif len(mask[0].shape) == 2:
-        in_structure = 'kernels'
-    elif len(mask[0].shape) == 1:
-        in_structure = 'filters'
-    else:
-        raise ValueError("Dont understand Shape %s of input mask, must be 1,2 or 4 (filters,kernels,weights)"%str(len(mask[0].shape)))
+	if len(mask[0].shape) == 4:
+		in_structure = 'weights'
+	elif len(mask[0].shape) == 2:
+		in_structure = 'kernels'
+	elif len(mask[0].shape) == 1:
+		in_structure = 'filters'
+	else:
+		raise ValueError("Dont understand Shape %s of input mask, must be 1,2 or 4 (filters,kernels,weights)"%str(len(mask[0].shape)))
 
-    if in_structure == structure:
-        print('provided mask already of structure %s'%structure)
-        return mask
+	if in_structure == structure:
+		print('provided mask already of structure %s'%structure)
+		return mask
 
-    out_mask = []
+	out_mask = []
 
-    for m in mask:
-        if structure in ['filters','nodes']:
-            m_flat = torch.reshape(m,(m.shape[0],-1))
-            z = torch.zeros(m_flat.shape[1])
-            m_out = ~torch.all(m_flat==z,dim=1)
+	for m in mask:
+		if structure in ['filters','nodes']:
+			m_flat = torch.reshape(m,(m.shape[0],-1))
+			z = torch.zeros(m_flat.shape[1])
+			m_out = ~torch.all(m_flat==z,dim=1)
 
-        else:
-            m_flat = torch.reshape(m,(m.shape[0]*m.shape[1],-1))
-            z = torch.zeros(m_flat.shape[1])
-            m_out = ~torch.reshape(torch.all(m_flat==z,dim=1),(m.shape[0],m.shape[1]))
+		else:
+			m_flat = torch.reshape(m,(m.shape[0]*m.shape[1],-1))
+			z = torch.zeros(m_flat.shape[1])
+			m_out = ~torch.reshape(torch.all(m_flat==z,dim=1),(m.shape[0],m.shape[1]))
 
-        m_out= m_out.type(torch.FloatTensor)
-        out_mask.append(m_out)
+		m_out= m_out.type(torch.FloatTensor)
+		out_mask.append(m_out)
 
-    return out_mask
+	return out_mask
 
 

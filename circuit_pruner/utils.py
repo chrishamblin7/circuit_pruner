@@ -33,6 +33,24 @@ def preprocess_image(image_path,params):
 	return image
 
 
+def jpg_convert_image_folder(path):
+	from PIL import Image
+	import os
+	images = os.listdir(path)
+
+	for image in images:
+	
+		im = Image.open(os.path.join(path,image))
+		im = im.convert("RGB")
+
+		im_name_split = image.split('.')
+		im_name_root = '.'.join(im_name_split[:-1])
+
+		im.save(os.path.join(path,im_name_root+'.jpg'))
+
+
+
+
 #### NAMING  ####
 
 #return list of names for conv modules based on their nested module names '_' seperated
@@ -135,28 +153,28 @@ def get_model_conv_weights(model):
 
 
 def get_model_filterids(model):
-    ref_name_modules(model)
-    
-    out = []
-    
-    next_filterid = 0
-    def get_ids(module, next_filterid = 0):
+	ref_name_modules(model)
+	
+	out = []
+	
+	next_filterid = 0
+	def get_ids(module, next_filterid = 0):
 
-        if hasattr(module, "_modules"):
-            for name, layer in module._modules.items():
+		if hasattr(module, "_modules"):
+			for name, layer in module._modules.items():
 
-                if layer is None:
-                    # e.g. GoogLeNet's aux1 and aux2 layers
-                    continue
-                if isinstance(layer, nn.Conv2d):
-                    num_filters = layer.weight.shape[0]
-                    out.append([layer.ref_name,list(range(next_filterid,next_filterid+num_filters))])
-                    next_filterid = next_filterid+num_filters
+				if layer is None:
+					# e.g. GoogLeNet's aux1 and aux2 layers
+					continue
+				if isinstance(layer, nn.Conv2d):
+					num_filters = layer.weight.shape[0]
+					out.append([layer.ref_name,list(range(next_filterid,next_filterid+num_filters))])
+					next_filterid = next_filterid+num_filters
 
-                get_ids(layer, next_filterid = next_filterid)
+				get_ids(layer, next_filterid = next_filterid)
 
-    get_ids(model)
-    return out
+	get_ids(model)
+	return out
 
 
 def filterid_2_perlayerid(filterid,model,imgnode_names = ['r','b','g']):    #takes in node unique id outputs tuple of layer and within layer id
@@ -336,3 +354,142 @@ def multipoint_min_distance(points):   #takes numpy array of shape (# points, # 
 	print(dist_mat)
 	return np.min(dist_mat)
 
+
+def mask_intersect_over_union(mask1,mask2):
+	iou = []
+	for i in range(len(mask1)):
+		intersect_mask = mask1[i]*mask2[i]
+		union_mask = torch.ceil((mask1[i]+mask2[i])/2)
+		iou.append(torch.sum(intersect_mask)/torch.sum(union_mask))
+	return iou
+	
+
+def plot_iou_from_masks(mask1,mask2):
+	import plotly.express as px
+	import pandas as pd
+	layer_IoU = mask_intersect_over_union(mask1,mask2)
+
+	Layer = []
+
+	for i in range(len(layer_IoU)):
+		Layer.append(str(i+1))
+
+	import plotly.graph_objects as go
+
+	fig = go.Figure()
+	fig.add_trace(go.Scatter(x=Layer, y=layer_IoU, fill='tozeroy',line_color=px.colors.qualitative.T10[0])) # fill down to xaxis
+	fig.update_layout({ 'width':500,
+						'plot_bgcolor':'rgba(255,255,255,1)',
+						'paper_bgcolor':'rgba(255,255,255,1)',
+						#'font_size':20
+						})
+	fig.update_yaxes(range=[0, 1],title_text='IoU')
+	fig.update_xaxes(title_text='Layer')
+	#fig.show()
+	return fig
+	
+	
+
+
+
+
+
+def circuit_2_model_sparsity(circuit,model,use_kernel_sparsity=True):
+	'''
+	sometimes we extract a subcircuit from a circuit, and then the sparsity is with respect to 
+	the circuit, not the original model. This function provides a factor of the circuit size to 
+	the original model size, so just multiply the subcircuit sparsity by the factor this 
+	function returns to get the sparsity of the subcircuit with respect to the orig model.
+
+	'''
+	from collections import OrderedDict
+
+	ref_name_modules(circuit)
+	ref_name_modules(model)
+	circuit_conv_dims = OrderedDict()
+	model_conv_dims = OrderedDict()
+
+	# recursive function to get layers
+	def get_dims(net,conv_dims,use_kernel_sparsity=use_kernel_sparsity,total_params=0,num_zero_params=0):
+		if hasattr(net, "_modules"):
+			for name, layer in net._modules.items():
+
+				if layer is None:
+					# e.g. GoogLeNet's aux1 and aux2 layers
+					continue
+				
+				if isinstance(layer, nn.Conv2d):
+					conv_dims[layer.ref_name] = [layer.weight.shape[0],layer.weight.shape[1]]
+					if use_kernel_sparsity:
+						total_params += int(layer.weight.shape[0]*layer.weight.shape[1])
+						kernel_sums = torch.sum(torch.abs(layer.weight), (2,3), keepdim=False)
+						num_zero_params += int((kernel_sums == 0).sum())					
+				if use_kernel_sparsity:
+					kernel_sparsity, conv_dims = get_dims(layer,conv_dims,use_kernel_sparsity=use_kernel_sparsity,total_params=total_params,num_zero_params=num_zero_params)
+				else:
+					conv_dims = get_dims(layer,conv_dims,use_kernel_sparsity=use_kernel_sparsity,total_params=total_params,num_zero_params=num_zero_params)
+
+		if use_kernel_sparsity:
+			kernel_sparsity = (total_params-num_zero_params)/total_params
+			return kernel_sparsity, conv_dims
+		else:
+			return conv_dims
+
+	if use_kernel_sparsity:
+		kernel_sparsity, circuit_conv_dims = get_dims(circuit, circuit_conv_dims)
+	else:
+		circuit_conv_dims = get_dims(circuit, circuit_conv_dims)
+	model_conv_dims = get_dims(model, model_conv_dims,use_kernel_sparsity=False)
+
+	circuit_size = 0
+	model_size = 0
+
+	last_feat = next(reversed(circuit_conv_dims))
+	for feat in circuit_conv_dims:
+		circuit_size += circuit_conv_dims[feat][0]*circuit_conv_dims[feat][1]
+		if feat == last_feat:
+			model_size += circuit_conv_dims[feat][0]*model_conv_dims[feat][1]
+		else:
+			model_size += model_conv_dims[feat][0]*model_conv_dims[feat][1]
+
+	filter_sparsity = circuit_size/model_size
+	print('filter sparsity: %s'%str(filter_sparsity))
+
+	if use_kernel_sparsity:
+		print('kernel sparsity: %s'%str(kernel_sparsity))
+		sparsity = kernel_sparsity*filter_sparsity
+	else:
+		sparsity = filter_sparsity
+
+	return sparsity
+
+
+def display_image_patch_for_activation(image_path,layer_name,position,receptive_fields,simple_name=False,frame = True, save=False,image_size=(3,224,224)):
+    '''
+    image_path -> full path to image
+    layer_name -> name of reference layer for activation map (can be a layer name based on _ convention or simple 'conv1' convention)
+    position -> a tuple (w,h) of position in activation map for which image patch is the receptive field
+    simple_name -> set to true if using 'conv1' 'conv2' naming convention, False otherwise
+    '''
+    from circuit_pruner.receptive_fields import receptive_field_for_unit
+    #if simple_name:
+    #    name_dict = gen_conv_name_dict(model)
+    #    layer_name = name_dict[layer_name]
+    recep_field = receptive_field_for_unit(receptive_fields, layer_name, position)
+    
+    image = Image.open(image_path)
+    #display(image)
+    resize_2_tensor = transforms.Compose([transforms.Resize((image_size[1],image_size[2])),transforms.ToTensor()])
+    tensor_image = resize_2_tensor(image)
+    rand_tensor = torch.zeros(image_size[0],image_size[1],image_size[2])
+    cropped_tensor_image = tensor_image[:,int(recep_field[0][0]):int(recep_field[0][1]),int(recep_field[1][0]):int(recep_field[1][1])]
+    rand_tensor[:,int(recep_field[0][0]):int(recep_field[0][1]),int(recep_field[1][0]):int(recep_field[1][1])] = cropped_tensor_image
+    if frame:
+        cropped_image = transforms.ToPILImage()(rand_tensor).convert("RGB")
+    else:    
+        cropped_image = transforms.ToPILImage()(cropped_tensor_image).convert("RGB")
+    
+    if save:
+        cropped_image.save(save)
+    else:
+        display(cropped_image)

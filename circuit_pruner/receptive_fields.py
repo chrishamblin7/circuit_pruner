@@ -1,9 +1,11 @@
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-
+from torchvision import transforms
 from collections import OrderedDict
 import numpy as np
+import torch.nn.functional as F
+
 
 def check_same(stride):
     if isinstance(stride, (list, tuple)):
@@ -185,3 +187,63 @@ def receptive_field_for_unit(receptive_field_dict, layer, unit_position):
         return rf_range
     else:
         raise KeyError("Layer name incorrect, or not included in the model.")
+
+
+totensor = transforms.ToTensor()
+topil = transforms.ToPILImage()
+
+class receptive_field_fit_transform:
+    def __init__(self, layer, target_position,recep_field_params=None,model=None,image_size=(3,244,244),device='cpu',shrinkage=1):
+        '''
+        shrinkage: 0<i<=1, the factor by which the image is shrunk inside the receptive field ("1" fits the image perfectly inside)
+        '''
+        if (recep_field_params is None) and (model is None):
+            raise ValueError('both argument "recep_field_params" and "model" are none, must specify at least one of these.')
+        if recep_field_params is None:
+            recep_field_params = receptive_field(model, image_size, device=device)
+     
+        self.recep_field_params = recep_field_params
+
+        self.image_size = image_size
+        self.target_position = target_position
+        self.layer = layer
+        self.shrinkage = shrinkage
+
+        self.recep_field = receptive_field_for_unit(recep_field_params, layer, target_position)
+        print(self.recep_field)
+        #self.recep_resize = transforms.Resize((int(self.recep_field[0][1]-self.recep_field[0][0]),int(self.recep_field[1][1]-self.recep_field[1][0])))
+
+    def __call__(self, img_tensor):
+        #blank backgrounds
+        out_tensor = torch.zeros(3,224,224)
+        
+        #shrunk images to size of receptive field
+        height_window = self.recep_field[0][1]-self.recep_field[0][0]
+        width_window = self.recep_field[1][1]-self.recep_field[1][0]
+        shrunk_img_tensor = F.interpolate(img_tensor.unsqueeze(0), size=(int(height_window*self.shrinkage),int(width_window*self.shrinkage)),mode='bilinear').squeeze(0)
+        #shrunk_img_tensor = self.recep_resize(img_tensor)
+
+        #position shrunk images on blanks at receptive field position
+        if self.shrinkage == 1:
+            out_tensor[:,int(self.recep_field[0][0]):int(self.recep_field[0][1]),int(self.recep_field[1][0]):int(self.recep_field[1][1])] = shrunk_img_tensor
+        else:
+            height = shrunk_img_tensor.shape[1]
+            width = shrunk_img_tensor.shape[2]
+            height_start = int(self.recep_field[0][0]+(height_window-height)/2)
+            width_start = int(self.recep_field[1][0]+(width_window-width)/2)
+            out_tensor[:,height_start:height_start+height,width_start:width_start+width] = shrunk_img_tensor
+
+
+        return out_tensor
+        # #check resultant images (whats actually going to get fed to the model)
+        # print(size)
+        # recep_circle_img = topil(circle_tensor)
+        # recep_circle_wt_border = ImageOps.expand(recep_circle_img, border=border, fill='black')
+        # display(recep_circle_wt_border)
+
+        # # normalize and unsqueeze for passing through model
+        # circle_tensor = norm(circle_tensor)
+        # circle_tensor = torch.unsqueeze(circle_tensor,0)
+        # circle_tensor = circle_tensor.to(device)
+    
+

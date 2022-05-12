@@ -301,7 +301,10 @@ def featviz_in_recep_field(model,feature_name,unit, input_dim = (3,224,224),imag
 	dis_model = dis_model.to(device).eval()
 
 	#all_recep_field_params = receptive_field(model.features, input_dim)
-	all_recep_field_params = receptive_field(model.to(device), input_dim)
+	try:
+		all_recep_field_params = receptive_field(model.to(device), input_dim)
+	except:
+		all_recep_field_params = receptive_field(model.features.to(device), input_dim)
 	
 	param_f = lambda: param.image(input_dim[1])
 	obj  = objectives.neuron(feature_name,unit)

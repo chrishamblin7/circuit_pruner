@@ -332,11 +332,14 @@ class dissected_Conv2d(torch.nn.Module):       #2d conv Module class that has pr
 				min_acts_target = min_acts[:,self.target_node]
 				optim_target = min_acts_target.mean()
 			elif isinstance(self.rank_field,list):
-				act_targets_sum = torch.FloatTensor(1).zero_().to(self.device) 
-				for i in range(len(self.rank_field)):
-					act_targets_sum += self.postbias_out[i,self.target_node,int(self.rank_field[i][0]),int(self.rank_field[i][1])]
-
-				optim_target = act_targets_sum/len(self.rank_field)
+				if isinstance(self.rank_field[0],list):
+					# we have a list of target positions, a different target position for each image in the batch
+					act_targets_sum = torch.FloatTensor(1).zero_().to(self.device) 
+					for i in range(len(self.rank_field)):
+						act_targets_sum += self.postbias_out[i,self.target_node,int(self.rank_field[i][0]),int(self.rank_field[i][1])]		
+				else:
+					act_targets_sum = self.postbias_out[:,self.target_node,int(self.rank_field[0]),int(self.rank_field[1])].sum()
+				optim_target = act_targets_sum/self.postbias_out.shape[0]
 				#raise Exception('List type rank field not yet implemented, use "min", "max",or "image" as the rank field')
 				#target_acts = 
 				#optim_target = target_acts.mean()
@@ -347,49 +350,144 @@ class dissected_Conv2d(torch.nn.Module):       #2d conv Module class that has pr
 		return postbias_out
 
 
+
+
+
+
 class hooked_Conv2d(torch.nn.Module):       #2d conv Module class that has presum activation maps as intermediate output
 
-	def __init__(self, from_conv,name=None, target_node=None, rank_field = 'image', device='cuda:0'):      # from conv is normal nn.Conv2d object to pull weights and bias from
+	def __init__(self, from_conv,name=None,store_activations=False, store_ranks = False, clear_ranks=False, target_node=None,absolute_rank = True, rank_field = 'image', device='cuda'):      # from conv is normal nn.Conv2d object to pull weights and bias from
 		super(hooked_Conv2d, self).__init__()
-		#self.from_conv = from_conv
+		self.from_conv = from_conv
 		self.name = name
 		self.in_channels = from_conv.weight.shape[1]
 		self.out_channels = from_conv.weight.shape[0]
-		self.target_node= target_node
+		self.target_node = target_node
 		self.device = device
+		self.store_activations = store_activations
+		self.store_ranks = store_ranks
+		self.clear_ranks = clear_ranks
 		self.rank_field = rank_field    #'image' means average over activation map, 'max' means rank with respect to maximum activation
+		self.absolute_rank = absolute_rank
 
 		self.edge_ablations = None
 		self.node_ablations = None
 
-		self.from_conv = from_conv
+		self.postbias_ranks = {'act':None,'grad':None,'actxgrad':None}
+		for rank_type in ['act','grad','actxgrad']:
+			self.postbias_ranks[rank_type] = torch.FloatTensor(self.out_channels).zero_().to(device)
+			#if self.cuda:
+			#	self.postbias_ranks[rank_type] = self.postbias_ranks[rank_type].cuda()
+			#	self.preadd_ranks[rank_type] = self.preadd_ranks[rank_type].cuda()
+
+		self.normalizations = {'nodes':{			
+							   'act':{'mean':None,'std':None,'l2':None,'l1':None,'max':None},
+							   'grad':{'mean':None,'std':None,'l2':None,'l1':None,'max':None},
+							   'actxgrad':{'mean':None,'std':None,'l2':None,'l1':None,'max':None}
+							   }}
+
+		self.images_seen = 0
+
+		if self.store_ranks:
+			self.postbias_out_hook = None	
+
+	
+	def compute_node_rank(self,grad):
+		activation = self.postbias_out
+		activation_relu = F.relu(activation)
+		taylor = activation * grad
+		if self.absolute_rank:
+			rank_key  = {'act':torch.abs(activation),'grad':torch.abs(grad),'actxgrad':taylor}
+		else:
+			rank_key  = {'act':activation,'grad':grad,'actxgrad':taylor}
+
+		for key in rank_key:
+			if self.postbias_ranks[key] is None: #initialize at 0
+				self.postbias_ranks[key] = torch.FloatTensor(activation.size(1)).zero_().to(self.device)
+				#if self.cuda:
+				#	self.postbias_ranks[key] = self.postbias_ranks[key].cuda()
+			map_mean = rank_key[key].mean(dim=(2, 3)).data
+			mean_sum = map_mean.sum(dim=0).data      
+			self.postbias_ranks[key] += mean_sum    # we sum up the mean activations over all images, after all batches
+			#have passed through we will average by the number of images seen with self.average_ranks
+		#print('length node_rank: ', len(self.postbias_ranks_prenorm['actxgrad']))
+		#print('length outdim: ', self.out_channels)
+		#print('node_rank time: %s'%str(time.time() - start))
+						
+	def average_ranks(self):
+		for rank_type in ['act','grad','actxgrad']:
+			if self.images_seen > 0:
+				self.postbias_ranks[rank_type] = self.postbias_ranks[rank_type]/self.images_seen
+
+	def abs_ranks(self):
+		for rank_type in ['act','grad','actxgrad']:
+			self.postbias_ranks[rank_type] = torch.abs(self.postbias_ranks[rank_type])       
+
+	def clear_ranks_func(self): #clear ranks, info that otherwise accumulates with images
+		self.images_seen = 0
+		for rank_type in ['act','grad','actxgrad']:
+			self.postbias_ranks[rank_type] = torch.FloatTensor(self.out_channels).zero_().to(self.device)
 
 	def forward(self, x):
-		y = self.from_conv(x)	
+		
+		if self.clear_ranks:
+			self.clear_ranks_func()
+
+		self.images_seen += x.shape[0]    #keep track of how many images weve seen so we know what to divide by when we average ranks
+		if self.store_activations:
+			self.input = x
+
+
+		postbias_out = self.from_conv(x)
+		#set ablated nodes to 0
+		if (self.node_ablations is not None) and (self.node_ablations != []):
+			postbias_out.index_fill_(1,torch.tensor(self.node_ablations).to(self.device),0)
+
+		#Store values of final module output
+		if self.store_activations:
+			self.postbias_out = postbias_out
+ 
+		#Set hooks for calculating rank on backward pass
+		if self.store_ranks:
+			self.postbias_out = postbias_out
+			if self.postbias_out_hook is not None:
+				self.postbias_out_hook.remove()
+			self.postbias_out_hook = self.postbias_out.register_hook(self.compute_node_rank)
+			#if self.postbias_ranks is not None:
+			#    print(self.postbias_ranks.shape)		
 
 		if self.target_node is not None:
 			#print('target reached, breaking model forward pass in %s'%self.name)
 			#print(self.target_node)
 			if self.rank_field == 'image':
-				avg_activations = y.mean(dim=(0, 2, 3))
-				self.optim_target = avg_activations[self.target_node]
-
+				avg_activations = self.postbias_out.mean(dim=(0, 2, 3))
+				optim_target = avg_activations[self.target_node]
 			elif self.rank_field == 'max':
-				max_acts = y.view(y.size(0),y.size(1), y.size(2)*y.size(3)).max(dim=-1).values
+				max_acts = self.postbias_out.view(self.postbias_out.size(0),self.postbias_out.size(1), self.postbias_out.size(2)*self.postbias_out.size(3)).max(dim=-1).values
 				max_acts_target = max_acts[:,self.target_node]
-				self.optim_target = max_acts_target.mean()
+				optim_target = max_acts_target.mean()
 			elif self.rank_field == 'min':
-				min_acts = y.view(y.size(0),y.size(1), y.size(2)*y.size(3)).min(dim=-1).values
+				min_acts = self.postbias_out.view(self.postbias_out.size(0),self.postbias_out.size(1), self.postbias_out.size(2)*self.postbias_out.size(3)).min(dim=-1).values
 				min_acts_target = min_acts[:,self.target_node]
-				self.optim_target = min_acts_target.mean()
+				optim_target = min_acts_target.mean()
 			elif isinstance(self.rank_field,list):
-				raise Exception('List type rank field not yet implemented, use "min", "max",or "image" as the rank field')
+				if isinstance(self.rank_field[0],list):
+					# we have a list of target positions, a different target position for each image in the batch
+					act_targets_sum = torch.FloatTensor(1).zero_().to(self.device) 
+					for i in range(len(self.rank_field)):
+						act_targets_sum += self.postbias_out[i,self.target_node,int(self.rank_field[i][0]),int(self.rank_field[i][1])]	
+				else:
+					act_targets_sum = self.postbias_out[:,self.target_node,int(self.rank_field[0]),int(self.rank_field[1])].sum()
+				optim_target = act_targets_sum/self.postbias_out.shape[0]
+				#raise Exception('List type rank field not yet implemented, use "min", "max",or "image" as the rank field')
 				#target_acts = 
 				#optim_target = target_acts.mean()
 			#print(optim_target)
+			optim_target.backward()
 			raise TargetReached
 			
-		return y
+		return postbias_out
+
 
 
 ### MODEL LEVEL FUNCTIONS ###
@@ -412,7 +510,7 @@ def dissect_model(model,mod_names = [],store_activations=True,store_ranks=True,c
 			if dissect:
 				new_module = dissected_Conv2d(module, name='_'.join(mod_names+[name]), store_activations=store_activations,store_ranks=store_ranks,rank_field=rank_field,clear_ranks=clear_ranks,device=device) 
 			else:
-				new_module = hooked_Conv2d(module, name='_'.join(mod_names+[name]),rank_field=rank_field,device=device) 
+				new_module = hooked_Conv2d(module, name='_'.join(mod_names+[name]),rank_field=rank_field, store_activations=store_activations,store_ranks=store_ranks,clear_ranks=clear_ranks,device=device) 
 			model._modules[name] = new_module
 
 		elif isinstance(module, torch.nn.modules.Dropout):    #make dropout layers not dropout  #also set batchnorm to eval
@@ -523,9 +621,10 @@ def get_activations_from_dissected_Conv2d_modules(module,layer_activations=None)
 		layer_activations = {'nodes':[],'edges_in':[],'edges_out':[]}
 	for layer, (name, submodule) in enumerate(module._modules.items()):
 		#print(submodule)
-		if isinstance(submodule, dissected_Conv2d):
+		if isinstance(submodule, dissected_Conv2d) or isinstance(submodule, hooked_Conv2d):
 			layer_activations['nodes'].append(submodule.postbias_out.cpu().detach().numpy())
 			layer_activations['edges_in'].append(submodule.input.cpu().detach().numpy())
+		if isinstance(submodule, dissected_Conv2d):
 			layer_activations['edges_out'].append(submodule.format_edges(data= 'activations'))
 			#print(layer_activations['edges_out'][-1].shape)
 		elif len(list(submodule.children())) > 0:
@@ -544,7 +643,9 @@ def get_ranks_from_dissected_Conv2d_modules(module,layer_ranks=None,weight_rank=
 
 	for layer, (name, submodule) in enumerate(module._modules.items()):
 		#print(submodule)
-		if isinstance(submodule, dissected_Conv2d):
+		if isinstance(submodule, dissected_Conv2d)  or isinstance(submodule, hooked_Conv2d):
+			if submodule.absolute_rank:
+				submodule.abs_ranks()
 			submodule.average_ranks()
 			if weight_rank:
 				rank_types = ['weight']
@@ -554,19 +655,29 @@ def get_ranks_from_dissected_Conv2d_modules(module,layer_ranks=None,weight_rank=
 			for rank_type in rank_types:
 				#submodule.gen_normalizations(rank_type)
 				layer_ranks['nodes'][rank_type].append([submodule.name,submodule.postbias_ranks[rank_type].cpu().detach().numpy().astype('float32')])
-				layer_ranks['edges'][rank_type].append([submodule.name,submodule.format_edges(data= 'ranks',rank_type=rank_type,weight_rank=weight_rank)])
-				#print(layer_ranks['edges'][-1].shape)
+				if isinstance(submodule, dissected_Conv2d):
+					layer_ranks['edges'][rank_type].append([submodule.name,submodule.format_edges(data= 'ranks',rank_type=rank_type,weight_rank=weight_rank)])
 		elif len(list(submodule.children())) > 0:
 			layer_ranks = get_ranks_from_dissected_Conv2d_modules(submodule,layer_ranks=layer_ranks,weight_rank=weight_rank)   #module has modules inside it, so recurse on this module
 	return layer_ranks
 
 
 def get_ranklist_from_dissected_Conv2d_modules(model,structure='edges',method='actxgrad'):
+	if structure== 'kernels': structure='edges'
+	if structure== 'filters': structure='nodes'
+
 	full_ranks = get_ranks_from_dissected_Conv2d_modules(model)
 
 	rank_list = []
 	for l in range(len(full_ranks[structure][method])):
-		if len(full_ranks[structure][method][l][1].nonzero()[1])>0:
-			rank_list.append(torch.tensor(full_ranks[structure][method][l][1]).to('cpu'))
+		if structure == 'edges':
+			if len(full_ranks[structure][method][l][1].nonzero()[1])>0:
+				rank_list.append(torch.tensor(full_ranks[structure][method][l][1]).to('cpu'))
+		else:
+			if len(full_ranks[structure][method][l][1].nonzero()[0])>0:
+				rank_list.append(torch.tensor(full_ranks[structure][method][l][1]).to('cpu'))
+
+
+
 
 	return rank_list
