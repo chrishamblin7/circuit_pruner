@@ -2,6 +2,12 @@ import plotly.graph_objs as go
 
 
 
+big_fig_layout = {'height':2000,
+                  'width':2000,
+                  'font':{'size':30}
+}
+
+
 'Layouts for cnn_gui.py'
 axis=dict(showbackground=False,
         showspikes=False,

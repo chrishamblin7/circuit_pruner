@@ -479,7 +479,7 @@ def gen_kernel_img(edge_name,model,viz_folder):
 from circuit_pruner import root_path
 from time import time
 
-def launch_circuit_gui(circuit,mask,orig_model,ranks,interactive=True,port=8050,viz_folder=None,use_img_nodes=False,normed_ranks=True,device='cuda'):
+def launch_circuit_gui(circuit,mask,orig_model,ranks,interactive=True,port=8050,dfs=None,viz_folder=None,use_img_nodes=False,normed_ranks=True,device='cuda'):
 
 
     #orig_kernels = get_model_conv_weights(orig_model)
@@ -513,8 +513,13 @@ def launch_circuit_gui(circuit,mask,orig_model,ranks,interactive=True,port=8050,
         
 
     #dataframes
-    edge_df = gen_circuit_model_mapping_df(orig_model,mask,ranks,version = 'edges')
-    node_df = gen_circuit_model_mapping_df(orig_model,mask,ranks,version = 'nodes')
+    if dfs is None:
+        edge_df = gen_circuit_model_mapping_df(orig_model,mask,ranks,version = 'edges')
+        node_df = gen_circuit_model_mapping_df(orig_model,mask,ranks,version = 'nodes')
+    else:
+        edge_df = dfs[0]
+        node_df = dfs[1]
+
        
     #graph data
     circuit_traces,pos_dict_nodes,pos_dict_edges = circuit_2_2d_circuit_diagram(circuit,mask,orig_model,ranks,
@@ -621,7 +626,7 @@ def launch_circuit_gui(circuit,mask,orig_model,ranks,interactive=True,port=8050,
     ))
 
     if not interactive:
-        return circuit_fig
+        return circuit_fig,edge_df,node_df
 
 
     #external_stylesheets = ['https://codepen.io/amyoshino/pen/jzXypZ.css']

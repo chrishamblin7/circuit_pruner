@@ -65,7 +65,6 @@ def gen_circuit_model_mapping_df(model,mask,ranks,version = 'edges'):
 
 def get_kernels_Conv2d_modules(module,kernels=[]): 
 	for layer, (name, submodule) in enumerate(module._modules.items()):
-		#print(submodule)
 		if isinstance(submodule, torch.nn.modules.conv.Conv2d):
 			kernels.append(submodule.weight.cpu().detach().numpy())
 		elif len(list(submodule.children())) > 0:
@@ -116,8 +115,11 @@ kernel_colors = posneg_to_rgb(kernel_posneg)
 
 
 def circuit_edge_width_scaling(x):
+	from math import e
 	#return max(.4,(x*10)**1.7)
-	return max(.5,np.exp(1.5*x))
+	#return max(.5,np.exp(1.5*x))
+	f = 1/(1+e**(-10*(x-.5)))*4
+	return min(max(max(f,6*x),.5),4)
 	
 
 def circuit_curve_2_id(curve_num,point_num,node_df,edge_df,layer_nodes,imgnode_names,use_img_nodes):
