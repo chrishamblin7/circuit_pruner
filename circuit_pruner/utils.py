@@ -364,7 +364,7 @@ def mask_intersect_over_union(mask1,mask2):
 	return iou
 	
 
-def plot_iou_from_masks(mask1,mask2):
+def plot_iou_from_masks(mask1,mask2,big=True):
 	import plotly.express as px
 	import pandas as pd
 	layer_IoU = mask_intersect_over_union(mask1,mask2)
@@ -376,8 +376,13 @@ def plot_iou_from_masks(mask1,mask2):
 
 	import plotly.graph_objects as go
 
+	if big:
+		m_size = 20
+	else:
+		m_size= 5
+
 	fig = go.Figure()
-	fig.add_trace(go.Scatter(x=Layer, y=layer_IoU, fill='tozeroy',line_color=px.colors.qualitative.T10[0])) # fill down to xaxis
+	fig.add_trace(go.Scatter(x=Layer, y=layer_IoU, fill='tozeroy',marker=dict(size=m_size),line_color=px.colors.qualitative.T10[0])) # fill down to xaxis
 	fig.update_layout({ 'width':500,
 						'plot_bgcolor':'rgba(255,255,255,1)',
 						'paper_bgcolor':'rgba(255,255,255,1)',

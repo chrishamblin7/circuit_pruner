@@ -1099,3 +1099,40 @@ def structured_mask_from_mask(mask, structure = 'kernels'):
 	return out_mask
 
 
+
+def circuit_kernel_magnitude_ranking(model, feature_targets = None,feature_targets_coefficients = None,random_ranks = False, device=None, structure='kernels', mask=None, setup_net=True): 
+
+	
+	assert structure in ('weights','kernels','filters')
+	
+	if device is None:
+		device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+	model.to('cpu').eval()
+	net = deepcopy(model)
+	net = net.to(device).eval()	
+	for param in net.parameters():
+		param.requires_grad = False
+	
+	if setup_net:
+		setup_net_for_circuit_prune(net, feature_targets=feature_targets)
+
+
+	rank_list = []
+
+	for layer in net.modules():
+		if isinstance(layer, nn.Conv2d):
+			if not layer.last_layer:
+				w = layer.weight.cpu()
+				w_abs = torch.abs(w)
+				rank_list.append(w_abs.mean(dim=(2, 3)))
+			else:
+				w_empty = torch.zeros(layer.weight.shape[0],layer.weight.shape[1]).cpu()
+				w = layer.weight[feature_targets[layer.ref_name][0]].cpu()
+				w_abs = torch.abs(w)
+				r = w_abs.mean(dim=(1, 2))
+				w_empty[feature_targets[layer.ref_name][0]] = r
+				rank_list.append(w_empty)
+				break
+
+	return rank_list

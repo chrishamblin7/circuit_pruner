@@ -2,9 +2,12 @@ import plotly.graph_objs as go
 
 
 
-big_fig_layout = {'height':2000,
-                  'width':2000,
-                  'font':{'size':30}
+big_fig_layout = {'height':1000,
+                  'width':1500,
+                  'font':{'size':30},
+                  'margin':dict(l=100, r=100, t=100, b=100),
+                  'plot_bgcolor':'rgba(255,255,255,1)',
+                  'paper_bgcolor':'rgba(255,255,255,1)',
 }
 
 
@@ -145,7 +148,8 @@ circuit_layout = go.Layout(
          #width=1000,
          clickmode = 'event+select',
          transition = {'duration': 20},
-         height=1300,
+         height=800,
+         width=1000,
          #showlegend=False,
          margin = dict(l=20, r=20, t=20, b=20),  
          #hovermode='closest',

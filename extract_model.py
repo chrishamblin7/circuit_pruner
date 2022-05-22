@@ -120,6 +120,8 @@ if __name__ == '__main__':
 				if len(grad.shape) == 4: #conv2d layer
 					rank_list.append(torch.mean(grad,dim = (1,2,3))) #average across channel height and width of each filter
 			
+	elif method == 'magnitude':
+		rank_list = layer_ranks['ranks']
 
 
 		
@@ -181,6 +183,7 @@ if __name__ == '__main__':
 	print('kept params in original mask: %s'%str(k))
 	
 	#generate mask
+
 	mask,cum_sal = mask_from_sparsity(rank_list,k)
 
 
@@ -236,7 +239,8 @@ if __name__ == '__main__':
 
 		activations = get_saved_target_activations_from_net(masked_model)
 		for l in activations:
-			activations[l] = activations[l].to('cpu')
+			#activations[l] = activations[l].to('cpu')
+			activations[l] = torch.from_numpy(activations[l])
 			if l not in masked_target_activations.keys():
 				masked_target_activations[l] = activations[l]
 			else:
@@ -333,7 +337,8 @@ if __name__ == '__main__':
 
 			activations = get_saved_target_activations_from_net(masked_pruned_model)
 			for l in activations:
-				activations[l] = activations[l].to('cpu')
+				#activations[l] = activations[l].to('cpu')
+				activations[l] = torch.from_numpy(activations[l])
 				if l not in pruned_target_activations.keys():
 					pruned_target_activations[l] = activations[l]
 				else:

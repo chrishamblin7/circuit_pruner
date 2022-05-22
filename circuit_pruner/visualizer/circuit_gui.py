@@ -24,7 +24,7 @@ import base64
 
 
 
-def circuit_2_2d_circuit_diagram(circuit,mask,orig_model,ranks,num_hoverpoints=4,use_img_nodes=False,normed_ranks=True,edge_df=None,node_df=None):
+def circuit_2_2d_circuit_diagram(circuit,mask,orig_model,ranks,num_hover_points=4,use_img_nodes=False,normed_ranks=True,edge_df=None,node_df=None):
 	
 	#kernels
 	kernels = get_kernels_Conv2d_modules(orig_model)
@@ -159,9 +159,9 @@ def circuit_2_2d_circuit_diagram(circuit,mask,orig_model,ranks,num_hoverpoints=4
 				else:
 					start_pos = imgnode_positions[dim][row.in_channel]
 
-				step = (end_pos-start_pos)/(num_hoverpoints+1)
+				step = (end_pos-start_pos)/(num_hover_points+1)
 				points = [start_pos]
-				for i in range(1,num_hoverpoints+1):
+				for i in range(1,num_hover_points+1):
 					points.append(start_pos+i*step)
 				points.append(end_pos)
 				edge_positions[dim]=points
@@ -479,7 +479,7 @@ def gen_kernel_img(edge_name,model,viz_folder):
 from circuit_pruner import root_path
 from time import time
 
-def launch_circuit_gui(circuit,mask,orig_model,ranks,interactive=True,port=8050,dfs=None,viz_folder=None,use_img_nodes=False,normed_ranks=True,device='cuda'):
+def launch_circuit_gui(circuit,mask,orig_model,ranks,interactive=True,port=8050,dfs=None,viz_folder=None,use_img_nodes=False,normed_ranks=True,device='cuda',num_hover_points=4):
 
 
     #orig_kernels = get_model_conv_weights(orig_model)
@@ -524,7 +524,7 @@ def launch_circuit_gui(circuit,mask,orig_model,ranks,interactive=True,port=8050,
     #graph data
     circuit_traces,pos_dict_nodes,pos_dict_edges = circuit_2_2d_circuit_diagram(circuit,mask,orig_model,ranks,
                                                                                 use_img_nodes=False,normed_ranks=True,
-                                                                                node_df = node_df,edge_df=edge_df)
+                                                                                node_df = node_df,edge_df=edge_df,num_hover_points=num_hover_points)
     
     circuit_fig=go.Figure(data=circuit_traces, layout=circuit_layout)
 
@@ -542,6 +542,7 @@ def launch_circuit_gui(circuit,mask,orig_model,ranks,interactive=True,port=8050,
     layer = -1
     within_id = 0
     for row in node_df.itertuples():
+        #import pdb; pdb.set_trace()
         layer_name = row.layer_name
         if row.layer == layer:
             within_id+=1
@@ -571,8 +572,8 @@ def launch_circuit_gui(circuit,mask,orig_model,ranks,interactive=True,port=8050,
                 #source="http://chrishamblin.xyz/images/viscnn_images/%s.jpg"%nodeid,
                 x=pos_dict_nodes[layer]['X'][within_id],
                 y=pos_dict_nodes[layer]['Y'][within_id],
-                sizex=1,
-                sizey=1,
+                sizex=.9,
+                sizey=.9,
                 name = pos_dict_nodes[layer]['name'][within_id]
             ))
 
@@ -586,11 +587,14 @@ def launch_circuit_gui(circuit,mask,orig_model,ranks,interactive=True,port=8050,
             img = base64.b64encode(open(img_file_path, 'rb').read())
             #getting best position
             best_dist=[0,0]
-            for pos in [2,3,1,4]:
+            #for pos in [2,3,1,4,5]:
+            #MAKE THIS A FUNCTION OF NUM_HOVER_POINTS
+            poses = [3,4,2,5,1,6]
+            for pos in poses:
                 far_enough_all=True
                 smallest_dist = 1000000000
                 for kernel_position in kernel_positions:
-                    dist, far_enough = min_distance(np.array([pos_dict_edges[layer]['X'][i][pos],pos_dict_edges[layer]['Y'][i][pos]]),np.array(kernel_position))
+                    dist, far_enough = min_distance(np.array([pos_dict_edges[layer]['X'][i][pos],pos_dict_edges[layer]['Y'][i][pos]]),np.array(kernel_position),minimum=.5)
                     if dist < smallest_dist:
                         smallest_dist=dist
                     if not far_enough:
@@ -600,7 +604,7 @@ def launch_circuit_gui(circuit,mask,orig_model,ranks,interactive=True,port=8050,
                     break
                 elif smallest_dist>best_dist[1]:
                     best_dist = [pos,smallest_dist]
-                if pos == 4:
+                if pos == 6:
                     kernel_positions.append([pos_dict_edges[layer]['X'][i][best_dist[0]],pos_dict_edges[layer]['Y'][i][best_dist[0]]])
 
             circuit_fig.add_layout_image(
@@ -611,8 +615,8 @@ def launch_circuit_gui(circuit,mask,orig_model,ranks,interactive=True,port=8050,
                     #y=pos_dict_edges[layer]['Y'][i][2],
                     x=kernel_positions[-1][0],
                     y=kernel_positions[-1][1],
-                    sizex=.5,
-                    sizey=.5,
+                    sizex=.4,
+                    sizey=.4,
                     name=edgeid,
                     visible=True
                 ))        
