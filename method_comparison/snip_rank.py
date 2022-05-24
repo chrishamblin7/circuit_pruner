@@ -129,7 +129,7 @@ if __name__ == '__main__':
 				'data_path':data_path,
 				'config':args.config
 					}
-	save_folder = 'circuit_ranks/'+params.name+'/'+imageset+'/'+method
+	save_folder = './circuit_ranks/'+params.name+'/'+imageset+'/'+method
 	if not os.path.exists(save_folder):
 		os.makedirs(save_folder,exist_ok=True)
 	torch.save(save_object,save_folder+'/%s_%s:%s_%s.pt'%(params.name,layer,str(unit),str(time.time())))

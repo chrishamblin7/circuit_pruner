@@ -132,7 +132,8 @@ if __name__ == '__main__':
 			pass
 		
 	#fetch ranks
-	layer_ranks = get_ranks_from_dissected_Conv2d_modules(dissected_model)
+	layer_ranks = get_ranklist_from_dissected_Conv2d_modules(dissected_model)
+	#layer_ranks = get_ranks_from_dissected_Conv2d_modules(dissected_model)
 
 
 
@@ -146,9 +147,9 @@ if __name__ == '__main__':
 				'config':args.config
 					}
 
-	if not os.path.exists('circuit_ranks/'+params.name+'/'+imageset+'/actxgrad'):
-		os.makedirs('circuit_ranks/'+params.name+'/'+imageset+'/actxgrad',exist_ok=True)
-	torch.save(save_object,'circuit_ranks/%s/%s/actxgrad/%s_%s:%s_%s.pt'%(params.name,imageset,params.name,layer,str(unit),str(time.time())))
+	if not os.path.exists('./circuit_ranks/'+params.name+'/'+imageset+'/actxgrad'):
+		os.makedirs('./circuit_ranks/'+params.name+'/'+imageset+'/actxgrad',exist_ok=True)
+	torch.save(save_object,'./circuit_ranks/%s/%s/actxgrad/%s_%s:%s_%s.pt'%(params.name,imageset,params.name,layer,str(unit),str(time.time())))
 
 
 	print(time.time() - start)

@@ -17,9 +17,9 @@ if __name__ == '__main__':
 
 
 
-	config = 'configs/alexnet_sparse_config.py'
-	layers = ['features_3','features_6','features_8','features_10']
-	data_path = 'image_data/imagenet_2'
+	config = '../configs/alexnet_sparse_config.py'
+	layers = ['features_6','features_8','features_10']
+	data_path = '../image_data/imagenet_2'
 	units = range(20)
 	device = 'cuda:0'
 	batch_size = 200
@@ -27,7 +27,6 @@ if __name__ == '__main__':
 	feature_targets = None
 	#set this to select specific feature taer
 	feature_targets = {
-						'features_3':list(range(192)),
 						'features_6':list(range(384)),
 						'features_8':list(range(256)),
 						'features_10':list(range(256))
@@ -125,9 +124,9 @@ if __name__ == '__main__':
 				'config':config
 					}
 
-	if not os.path.exists('target_activations/'+params.name+'/'+imageset):
-		os.makedirs('target_activations/'+params.name+'/'+imageset,exist_ok=True)
-	torch.save(save_object,'target_activations/'+params.name+'/'+imageset+'/activations_%s.pt'%(str(time.time())))
+	if not os.path.exists('./target_activations/'+params.name+'/'+imageset):
+		os.makedirs('./target_activations/'+params.name+'/'+imageset,exist_ok=True)
+	torch.save(save_object,'./target_activations/'+params.name+'/'+imageset+'/activations_%s.pt'%(str(time.time())))
 
 	print(time.time() - start)
 

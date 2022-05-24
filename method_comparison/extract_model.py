@@ -92,17 +92,17 @@ if __name__ == '__main__':
 
 
 
-	if method == 'actxgrad':	
-		rank_list = []
+	# if method == 'actxgrad':	
+	# 	rank_list = []
 		
-		#HACK
-		depths = {'features_0':1,'features_3':2,'features_6':3,'features_8':4,'features_10':5}
+	# 	#HACK
+	# 	depths = {'features_0':1,'features_3':2,'features_6':3,'features_8':4,'features_10':5}
 
-		for l in range(depths[layer]):
-			#print(layer_ranks['ranks'][structure][method][l][0])
-			rank_list.append(torch.tensor(layer_ranks['ranks'][structure][method][l][1]).to('cpu'))
+	# 	for l in range(depths[layer]):
+	# 		#print(layer_ranks['ranks'][structure][method][l][0])
+	# 		rank_list.append(torch.tensor(layer_ranks['ranks'][structure][method][l][1]).to('cpu'))
 		
-	elif method == 'snip':
+	if (method == 'snip') or (method == 'actxgrad'):
 		for l in layer_ranks['ranks']:
 			l = l.to('cpu')
 		layer_ranks = layer_ranks['ranks']
@@ -388,7 +388,7 @@ if __name__ == '__main__':
 
 
 
-	save_folder = 'extracted_circuits/'+params.name+'/'+imageset+'/'+method
+	save_folder = './extracted_circuits/'+params.name+'/'+imageset+'/'+method
 	if not os.path.exists(save_folder):
 		os.makedirs(save_folder,exist_ok=True)
 	torch.save(save_object,save_folder+'/%s_%s_%s.pt'%(params.name,feature_name,str(sparsity)))
