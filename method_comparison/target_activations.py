@@ -110,7 +110,8 @@ if __name__ == '__main__':
 		activations = get_saved_target_activations_from_net(pruned_model)
 
 		for l in activations:
-			activations[l] = activations[l].to('cpu')
+			activations[l] = torch.from_numpy(activations[l])
+			#activations[l] = activations[l].to('cpu')
 			if l not in orig_target_activations.keys():
 				orig_target_activations[l] = activations[l]
 			else:
@@ -126,7 +127,7 @@ if __name__ == '__main__':
 
 	if not os.path.exists('./target_activations/'+params.name+'/'+imageset):
 		os.makedirs('./target_activations/'+params.name+'/'+imageset,exist_ok=True)
-	torch.save(save_object,'./target_activations/'+params.name+'/'+imageset+'/activations_%s.pt'%(str(time.time())))
+	torch.save(save_object,'./target_activations/'+params.name+'/'+imageset+'/orig_activations.pt')
 
 	print(time.time() - start)
 

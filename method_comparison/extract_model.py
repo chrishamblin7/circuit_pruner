@@ -91,18 +91,7 @@ if __name__ == '__main__':
 			break
 
 
-
-	# if method == 'actxgrad':	
-	# 	rank_list = []
-		
-	# 	#HACK
-	# 	depths = {'features_0':1,'features_3':2,'features_6':3,'features_8':4,'features_10':5}
-
-	# 	for l in range(depths[layer]):
-	# 		#print(layer_ranks['ranks'][structure][method][l][0])
-	# 		rank_list.append(torch.tensor(layer_ranks['ranks'][structure][method][l][1]).to('cpu'))
-		
-	if (method == 'snip') or (method == 'actxgrad'):
+	if method == 'snip':
 		for l in layer_ranks['ranks']:
 			l = l.to('cpu')
 		layer_ranks = layer_ranks['ranks']
@@ -120,11 +109,10 @@ if __name__ == '__main__':
 				if len(grad.shape) == 4: #conv2d layer
 					rank_list.append(torch.mean(grad,dim = (1,2,3))) #average across channel height and width of each filter
 			
-	elif method == 'magnitude':
+	else:
 		rank_list = layer_ranks['ranks']
 
-
-		
+	
 	#model
 
 	model = params.model

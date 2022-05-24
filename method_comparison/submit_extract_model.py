@@ -6,13 +6,12 @@ start = time.time()
 
 config = '../configs/alexnet_sparse_config.py'
 layers = ['features_6','features_8','features_10']
-#layers = ['features_6']
 data_path = '../image_data/imagenet_2/'
 units = range(20)
 device = 'cuda:0'
 method = 'magnitude'
 sparsities = [.9,.8,.7,.6,.5,.4,.3,.2,.1,.05,.01,.005,.001]
-#sparsities = [.95]
+
 
 for unit in units:
     print('PROCESSING UNIT: %s'%str(unit))

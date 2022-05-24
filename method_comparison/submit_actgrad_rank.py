@@ -1,3 +1,11 @@
+'''
+THIS RUNS SLOWLY. Unfortunately our method for getting 
+kernel-wise activation maps is not optimal. (see
+circuit_pruner.dissect_Conv2d.dissected_Conv2d,
+can you come up with a faster way . . .?)
+'''
+
+
 from subprocess import call
 
 config = '../configs/alexnet_sparse_config.py'

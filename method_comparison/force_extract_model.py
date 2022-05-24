@@ -129,9 +129,14 @@ if __name__ == '__main__':
 
 	feature_target = {layer:[unit]}
 
+	setup_net_for_circuit_prune(masked_model, feature_targets=feature_target, rank_field = rank_field)
 
 	#generate weight mask with FORCE pruner
-	ranks,mask = circuit_FORCE_pruning(masked_model, dataloader, feature_targets = feature_target,feature_targets_coefficients = None, T=T,full_dataset = True, keep_ratio=sparsity, num_params_to_keep=None, device=device, structure=structure, rank_field = rank_field, mask=None, setup_net=True, return_ranks = True)    #progressive skeletonization
+	ranks,mask = circuit_FORCE_pruning(masked_model, dataloader, 
+									   feature_targets = feature_target,feature_targets_coefficients = None, 
+									   T=T,full_dataset = True, keep_ratio=sparsity, num_params_to_keep=None, 
+									   device=device, structure=structure, rank_field = rank_field, mask=None, 
+									   setup_net=False, return_ranks = True)    #progressive skeletonization
 
 	#get structured mask
 	if structure == 'weights':
