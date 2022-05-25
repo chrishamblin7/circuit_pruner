@@ -569,7 +569,6 @@ def launch_circuit_gui(circuit,mask,orig_model,ranks,interactive=True,port=8050,
         circuit_fig.add_layout_image(
             dict(
                 source='data:image/jpg;base64,{}'.format(img.decode()),
-                #source="http://chrishamblin.xyz/images/viscnn_images/%s.jpg"%nodeid,
                 x=pos_dict_nodes[layer]['X'][within_id],
                 y=pos_dict_nodes[layer]['Y'][within_id],
                 sizex=.9,
@@ -610,7 +609,7 @@ def launch_circuit_gui(circuit,mask,orig_model,ranks,interactive=True,port=8050,
             circuit_fig.add_layout_image(
                 dict(
                     source='data:image/jpg;base64,{}'.format(img.decode()),
-                    #source="http://chrishamblin.xyz/images/viscnn_images/%s.jpg"%nodeid,
+                    
                     #x=pos_dict_edges[layer]['X'][i][2],
                     #y=pos_dict_edges[layer]['Y'][i][2],
                     x=kernel_positions[-1][0],
