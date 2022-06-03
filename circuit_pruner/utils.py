@@ -470,31 +470,60 @@ def circuit_2_model_sparsity(circuit,model,use_kernel_sparsity=True):
 
 
 def display_image_patch_for_activation(image_path,layer_name,position,receptive_fields,simple_name=False,frame = True, save=False,image_size=(3,224,224)):
-    '''
-    image_path -> full path to image
-    layer_name -> name of reference layer for activation map (can be a layer name based on _ convention or simple 'conv1' convention)
-    position -> a tuple (w,h) of position in activation map for which image patch is the receptive field
-    simple_name -> set to true if using 'conv1' 'conv2' naming convention, False otherwise
-    '''
-    from circuit_pruner.receptive_fields import receptive_field_for_unit
-    #if simple_name:
-    #    name_dict = gen_conv_name_dict(model)
-    #    layer_name = name_dict[layer_name]
-    recep_field = receptive_field_for_unit(receptive_fields, layer_name, position)
-    
-    image = Image.open(image_path)
-    #display(image)
-    resize_2_tensor = transforms.Compose([transforms.Resize((image_size[1],image_size[2])),transforms.ToTensor()])
-    tensor_image = resize_2_tensor(image)
-    rand_tensor = torch.zeros(image_size[0],image_size[1],image_size[2])
-    cropped_tensor_image = tensor_image[:,int(recep_field[0][0]):int(recep_field[0][1]),int(recep_field[1][0]):int(recep_field[1][1])]
-    rand_tensor[:,int(recep_field[0][0]):int(recep_field[0][1]),int(recep_field[1][0]):int(recep_field[1][1])] = cropped_tensor_image
-    if frame:
-        cropped_image = transforms.ToPILImage()(rand_tensor).convert("RGB")
-    else:    
-        cropped_image = transforms.ToPILImage()(cropped_tensor_image).convert("RGB")
-    
-    if save:
-        cropped_image.save(save)
-    else:
-        display(cropped_image)
+	'''
+	image_path -> full path to image
+	layer_name -> name of reference layer for activation map (can be a layer name based on _ convention or simple 'conv1' convention)
+	position -> a tuple (w,h) of position in activation map for which image patch is the receptive field
+	simple_name -> set to true if using 'conv1' 'conv2' naming convention, False otherwise
+	'''
+	from circuit_pruner.receptive_fields import receptive_field_for_unit
+	#if simple_name:
+	#    name_dict = gen_conv_name_dict(model)
+	#    layer_name = name_dict[layer_name]
+	recep_field = receptive_field_for_unit(receptive_fields, layer_name, position)
+	
+	image = Image.open(image_path)
+	#display(image)
+	resize_2_tensor = transforms.Compose([transforms.Resize((image_size[1],image_size[2])),transforms.ToTensor()])
+	tensor_image = resize_2_tensor(image)
+	rand_tensor = torch.zeros(image_size[0],image_size[1],image_size[2])
+	cropped_tensor_image = tensor_image[:,int(recep_field[0][0]):int(recep_field[0][1]),int(recep_field[1][0]):int(recep_field[1][1])]
+	rand_tensor[:,int(recep_field[0][0]):int(recep_field[0][1]),int(recep_field[1][0]):int(recep_field[1][1])] = cropped_tensor_image
+	if frame:
+		cropped_image = transforms.ToPILImage()(rand_tensor).convert("RGB")
+	else:    
+		cropped_image = transforms.ToPILImage()(cropped_tensor_image).convert("RGB")
+	
+	if save:
+		cropped_image.save(save)
+	else:
+		display(cropped_image)
+
+
+def mix_image_folders(image_root_folder,infolders,outfolders,max_num=35):
+	from subprocess import call
+	import math
+	import random
+
+	#outfolders = ['mixed_0','mixed_1']
+	image_root_folder = image_root_folder+'/'
+
+	for outfolder in outfolders:
+		if not os.path.exists(image_root_folder+outfolder):
+			os.mkdir(image_root_folder+outfolder)
+
+	#infolders = ['cluster_0','cluster_1']
+
+	max_num = 35
+
+	for infolder in infolders:
+		fs = os.listdir(image_root_folder+infolder)
+		random.shuffle(fs)
+		for f in fs[0:math.floor(max_num/2)]:
+			new_name = f.replace('.jpg','_'+infolder+'.jpg')
+			call('ln -s %s %s'%(os.path.join(image_root_folder,infolder,f),os.path.join(image_root_folder,outfolders[0],new_name)),shell=True)
+		for f in fs[math.floor(max_num/2):max_num]:
+			new_name = f.replace('.jpg','_'+infolder+'.jpg')
+			call('ln -s %s %s'%(os.path.join(image_root_folder,infolder,f),os.path.join(image_root_folder,outfolders[1],new_name)),shell=True)
+
+

@@ -19,10 +19,6 @@ import torch.nn as nn
 
 model = models.alexnet(pretrained=True)
 
-if not os.path.exists(root_path+'/models/alexnet_sparse_statedict.pt'):
-	from circuit_pruner.download_from_gdrive import download_from_gdrive
-	download_from_gdrive('alexnet_sparse',target = 'model')
-
 
 model_statedict = torch.load(root_path+'/models/alexnet_sparse_statedict.pt',map_location='cpu')
 model.load_state_dict(model_statedict)
@@ -31,10 +27,6 @@ model.load_state_dict(model_statedict)
 
 
 ###DATA PATH###
-
-if not os.path.exists(root_path+'/image_data/imagenet_2'):
-	from circuit_pruner.download_from_gdrive import download_from_gdrive
-	download_from_gdrive('alexnet_sparse',target = 'images')
 
 data_path =  root_path+'/image_data/imagenet_2'   #Set this to the system path for the folder containing input images you would like to see network activation maps for.
 

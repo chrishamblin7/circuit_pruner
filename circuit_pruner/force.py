@@ -740,7 +740,7 @@ def circuit_FORCE_pruning(model, dataloader, feature_targets = None,feature_targ
 		device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 	model.to('cpu').eval()
-	net = deepcopy(model)
+	net = model
 	net = net.to(device).eval()	
 	for param in net.parameters():
 		param.requires_grad = False

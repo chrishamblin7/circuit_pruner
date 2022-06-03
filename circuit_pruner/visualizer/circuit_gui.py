@@ -24,7 +24,7 @@ import base64
 
 
 
-def circuit_2_2d_circuit_diagram(circuit,mask,orig_model,ranks,num_hover_points=4,use_img_nodes=False,normed_ranks=True,edge_df=None,node_df=None):
+def circuit_2_2d_circuit_diagram(circuit,mask,orig_model,ranks,num_hover_points=6,use_img_nodes=False,normed_ranks=True,edge_df=None,node_df=None):
 	
 	#kernels
 	kernels = get_kernels_Conv2d_modules(orig_model)
@@ -479,7 +479,7 @@ def gen_kernel_img(edge_name,model,viz_folder):
 from circuit_pruner import root_path
 from time import time
 
-def launch_circuit_gui(circuit,mask,orig_model,ranks,interactive=True,port=8050,dfs=None,viz_folder=None,use_img_nodes=False,normed_ranks=True,device='cuda',num_hover_points=4):
+def launch_circuit_gui(circuit,mask,orig_model,ranks,interactive=True,port=8050,dfs=None,viz_folder=None,use_img_nodes=False,normed_ranks=True,device='cuda',num_hover_points=6):
 
 
     #orig_kernels = get_model_conv_weights(orig_model)
@@ -569,7 +569,6 @@ def launch_circuit_gui(circuit,mask,orig_model,ranks,interactive=True,port=8050,
         circuit_fig.add_layout_image(
             dict(
                 source='data:image/jpg;base64,{}'.format(img.decode()),
-                #source="http://chrishamblin.xyz/images/viscnn_images/%s.jpg"%nodeid,
                 x=pos_dict_nodes[layer]['X'][within_id],
                 y=pos_dict_nodes[layer]['Y'][within_id],
                 sizex=.9,
@@ -610,7 +609,7 @@ def launch_circuit_gui(circuit,mask,orig_model,ranks,interactive=True,port=8050,
             circuit_fig.add_layout_image(
                 dict(
                     source='data:image/jpg;base64,{}'.format(img.decode()),
-                    #source="http://chrishamblin.xyz/images/viscnn_images/%s.jpg"%nodeid,
+                    
                     #x=pos_dict_edges[layer]['X'][i][2],
                     #y=pos_dict_edges[layer]['Y'][i][2],
                     x=kernel_positions[-1][0],
