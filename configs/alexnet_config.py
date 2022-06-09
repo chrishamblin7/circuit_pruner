@@ -1,4 +1,4 @@
-### Config File for Alexnet Sparse. ###
+### Config File for Alexnet. ###
 
 
 import torch
@@ -21,6 +21,10 @@ model = models.alexnet(pretrained=True)
 
 
 ###DATA PATH###
+if not os.path.exists(root_path+'/image_data/imagenet_2'):
+	from circuit_pruner.download_from_gdrive import download_from_gdrive
+	download_from_gdrive('alexnet_sparse',target = 'images')
+
 
 data_path =  root_path+'/image_data/imagenet_2'   #Set this to the system path for the folder containing input images you would like to see network activation maps for.
 
