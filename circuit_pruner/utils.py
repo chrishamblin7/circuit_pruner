@@ -70,6 +70,21 @@ def get_conv_full_names(model,mod_names = [],mod_full_names = []):
 	return mod_full_names     
 
 
+#get weights from model as list
+def get_weight_list(model,weights = []):
+	#gen names based on nested modules
+	for name, module in model._modules.items():
+		if len(list(module.children())) > 0:
+			# recurse
+			weights =  get_weight_list(module,weights=weights)
+
+		if isinstance(module, torch.nn.modules.conv.Conv2d) or isinstance(module, torch.nn.Linear):    # found a 2d conv module
+			weights.append(module.weight.detach().cpu())
+			#new_module = dissected_Conv2d(module, name='_'.join(mod_names+[name]), store_activations=store_activations,store_ranks=store_ranks,clear_ranks=clear_ranks,cuda=cuda,device=device) 
+			#model._modules[name] = new_module
+	return weights   
+
+
 def ref_name_modules(net):
 	
 	# recursive function to get layers

@@ -109,6 +109,29 @@ class single_image_data(Dataset):
 		return (img,label)
 
 
+class simple_data(Dataset):
+	''' a dataloader that does nothing but return the data fed into
+		the dataloader.
+	'''
+
+	def __init__(self,data,target):
+		self.data = data
+		self.target = target
+	
+	def __len__(self):
+		if len(self.data.shape) == 3:
+			return 1
+		else:
+			return len(self.data)   
+
+	def __getitem__(self, idx):
+		
+		if len(self.data.shape) == 3:
+			return (self.data,int(self.target))
+		else:
+			return (self.data[idx],int(self.target[idx]))
+
+
 
 
 class rank_image_data(Dataset):
@@ -207,3 +230,5 @@ def order_target(target,order_file):
 		sys.exit('only 1 dimensional target vectors currently supported, not 2 :(')
 	else:
 		sys.exit('target has incompatible shape for reordering: %s'%str(target.shape))
+
+

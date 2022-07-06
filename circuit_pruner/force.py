@@ -636,8 +636,6 @@ def circuit_snip_rank(net, dataloader, feature_targets = None, feature_targets_c
 		targets = targets.to(device)
 
 
-
-
 		# Compute gradients (but don't apply them)
 		net.zero_grad()
 		
