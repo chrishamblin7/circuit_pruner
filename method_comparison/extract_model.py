@@ -28,6 +28,7 @@ def get_args():
 						help='use circuit_pruner.force.show_model_layer_names(model) to see options')
 	parser.add_argument("--config", type = str,default = 'configs/alexnet_sparse_config.py',help='relative_path to config file')
 	parser.add_argument("--data-path", type = str, default = None, help='path to image data folder')
+	parser.add_argument("--rank-data-path", type = str, default = None, help='path to image data folder used to get model ranks')
 	parser.add_argument('--device', type = str, default='cuda:0', help='default "cuda:0"')  
 	parser.add_argument('--method', type = str, default='actxgrad', help='default actxgrad') 
 	parser.add_argument('--structure', type = str, default='edges', help='default edges') 
@@ -79,11 +80,18 @@ if __name__ == '__main__':
 	config_module = config.split('/')[-1].replace('.py','')
 	params = __import__(config_module)
 
-	data_path = params.data_path
+	data_path = args.data_path
 	imageset = data_path.split('/')[-1]
+	if imageset == '':
+		imageset = data_path.split('/')[-2]
+
+	rank_data_path = args.rank_data_path
+	rank_imageset = rank_data_path.split('/')[-1]
+	if rank_imageset == '':
+		rank_imageset = rank_data_path.split('/')[-2]
 
 	#get ranks
-	ranks_folder = 'circuit_ranks/'+params.name+'/'+imageset+'/'+method+'/'
+	ranks_folder = 'circuit_ranks/'+params.name+'/'+rank_imageset+'/'+method+'/'
 
 	for f in os.listdir(ranks_folder):
 		if feature_name+'_' in f:
@@ -111,6 +119,19 @@ if __name__ == '__main__':
 			
 	else:
 		rank_list = layer_ranks['ranks']
+
+	#fix old formatting
+	if isinstance(rank_list,dict):
+		if structure in ['kernels','edges']:
+			structure_k = 'edges'
+		elif structure in ['nodes','edges']:
+			structure_k = 'nodes'
+		new_rank_list = []
+		for l in rank_list[structure_k][method]:
+			new_rank_list.append(torch.from_numpy(l[1]))
+			if l[0] == layer:
+				break
+		rank_list = new_rank_list
 
 	
 	#model
@@ -171,7 +192,6 @@ if __name__ == '__main__':
 	print('kept params in original mask: %s'%str(k))
 	
 	#generate mask
-
 	mask,cum_sal = mask_from_sparsity(rank_list,k)
 
 
@@ -190,7 +210,7 @@ if __name__ == '__main__':
 
 
 	#apply mask
-	if structure == 'filters':
+	if (structure == 'filters') or (structure == 'nodes'):
 		reset_masks_in_net(masked_model)
 		apply_filter_mask(masked_model,mask) #different than masking weights, because it also masks biases
 	else:
@@ -349,6 +369,7 @@ if __name__ == '__main__':
 		'structure':structure,
 		'batch_size':batch_size,
 		'data_path':data_path,
+		'rank_data_path':rank_data_path,
 		'config':args.config,
 		'masked_target_activations':masked_target_activations,
 		'feature_name':feature_name,

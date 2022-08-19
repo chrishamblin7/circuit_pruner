@@ -263,8 +263,8 @@ def fill_zeros_in_kernel_mask(masked_model,mask,k):
 
 
 def model_ranks_2_circuit_model(layer_ranks,sparsity,model,feature_targets,device,method='actxgrad',structure='edges',use_effective_mask=True,rank_field='image',zero_zeros=False):
-	if structure== 'kernels': structure='edges'
-	if structure== 'filters': structure='nodes'
+	if structure == 'kernels': structure='edges'
+	if structure == 'filters': structure='nodes'
 
 
 	rank_list = []

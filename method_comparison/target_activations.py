@@ -16,16 +16,16 @@ from copy import deepcopy
 if __name__ == '__main__':
 
 
-
-	config = '../configs/alexnet_sparse_config.py'
+	config = '../configs/alexnet_config.py'
 	layers = ['features_6','features_8','features_10']
-	data_path = '../image_data/imagenet_2'
+	#data_path = '../image_data/imagenet_2'
+	data_path = '../image_data/imagenet_2_test'
 	units = range(20)
 	device = 'cuda:0'
 	batch_size = 200
 
 	feature_targets = None
-	#set this to select specific feature taer
+	#set this to select specific feature targets
 	feature_targets = {
 						'features_6':list(range(384)),
 						'features_8':list(range(256)),

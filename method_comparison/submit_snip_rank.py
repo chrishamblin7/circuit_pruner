@@ -3,7 +3,8 @@ from subprocess import call
 config = '../configs/alexnet_sparse_config.py'
 
 layers = ['features_6','features_8','features_10']
-data_path = '../image_data/imagenet_2/'
+#data_path = '../image_data/imagenet_2/'
+data_path = '../image_data/imagenet_2_test/'
 units = range(20)
 device = 'cuda:0'
 
