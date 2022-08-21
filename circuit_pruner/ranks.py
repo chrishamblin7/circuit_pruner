@@ -316,3 +316,22 @@ def minmax_norm_ranks(ranks, layerwise=True):
 # 		raise Exception('length of threshold needs to be two ([lower, higher])')
 # 	return df.loc[(df[rank_type+'_rank'] >= threshold[0]) & (df[rank_type+'_rank'] <= threshold[1])]
 
+
+
+def rankdict_2_ranklist(rank_dict,structure='edges',method='actxgrad'):
+	if isinstance(rank_dict,list):
+		rank_list = rank_dict
+	else:
+		rank_list = []
+		if 'ranks' in rank_dict.keys():
+			rank_dict = rank_dict['ranks']
+
+		for l in range(len(rank_dict[structure][method])):
+			if structure == 'edges':
+				if len(rank_dict[structure][method][l][1].nonzero()[1])>0:
+					rank_list.append(torch.tensor(rank_dict[structure][method][l][1]).to('cpu'))
+			else:
+				if len(rank_dict[structure][method][l][1].nonzero()[0])>0:
+					rank_list.append(torch.tensor(rank_dict[structure][method][l][1]).to('cpu'))
+
+	return rank_list
