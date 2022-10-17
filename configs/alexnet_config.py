@@ -33,3 +33,23 @@ label_file_path = root_path+'/image_data/imagenet_labels.txt'      #line seperat
 						  #make sure the order of labels matches the order in desired target vectors
 
 
+
+###DATA PREPROCESSING###
+
+from torchvision import transforms
+
+preprocess =  transforms.Compose([
+        						transforms.Resize((224,224)),
+        						transforms.ToTensor(),
+								transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     	 			 std=[0.229, 0.224, 0.225])])
+
+
+#GPU
+device = 'cuda:0'
+
+
+#AUX 
+num_workers = 4     #num workers argument in dataloader
+seed = 2            #manual seed
+batch_size = 200   #batch size for feeding rank image set through model (input image set is sent through all at once)
