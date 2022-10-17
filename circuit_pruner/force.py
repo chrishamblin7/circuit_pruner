@@ -657,14 +657,21 @@ def circuit_snip_rank(net, dataloader, feature_targets = None, feature_targets_c
 		if grads == []:
 			for layer in net.modules():
 				if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear):
-					grads.append(torch.abs(layer.weight_mask.grad))
+					try:
+						grads.append(torch.abs(layer.weight_mask.grad))
+					except:
+						grads.append(torch.zeros(layer.weight_mask.shape))
+						#import pdb; pdb.set_trace()
 					if layer.last_layer:
 						break
 		else:
 			count = 0
 			for layer in net.modules():
 				if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear):
-					grads[count] += torch.abs(layer.weight_mask.grad)        
+					try:
+						grads[count] += torch.abs(layer.weight_mask.grad) 
+					except:
+						continue       
 					count += 1
 					if layer.last_layer:
 						break
@@ -992,8 +999,13 @@ def snip_scores(net,dataloader, feature_targets = None, feature_targets_coeffici
 	return structure_grads
 
 
+def mask_from_sparsity(rank_list, k, random_mask=False):
 
-def mask_from_sparsity(rank_list, k):
+	if random_mask:
+		random_rank_list = []
+		for g in rank_list:
+			random_rank_list.append(torch.rand(g.shape))
+		rank_list = random_rank_list
 
 	all_scores = torch.cat([torch.flatten(x) for x in rank_list])
 	norm_factor = torch.sum(abs(all_scores))
@@ -1005,12 +1017,20 @@ def mask_from_sparsity(rank_list, k):
 	acceptable_score = threshold[-1]
 	cum_sal = torch.sum(threshold)
 
+	if acceptable_score == 0:
+		print('gradients from this feature are sparse,\
+the minimum acceptable rank at this sparsity has a score of zero! \
+we will return a mask thats smaller than you asked, by masking all \
+parameters with a score of zero.')
+
+
 	mask = []
 
 	for g in rank_list:
-		mask.append(((g / norm_factor) >= acceptable_score).float())
+		mask.append(((g / norm_factor) > acceptable_score).float())
 		
 	return mask,cum_sal
+
 
 
 

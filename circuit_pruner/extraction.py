@@ -199,7 +199,13 @@ def extract_circuit_with_eff_mask(model,eff_mask):
 
 
 
-def mask_from_sparsity(rank_list, k):
+def mask_from_sparsity(rank_list, k, random_mask=False):
+
+	if random_mask:
+		random_rank_list = []
+		for g in rank_list:
+			random_rank_list.append(torch.rand(g.shape))
+		rank_list = random_rank_list
 
 	all_scores = torch.cat([torch.flatten(x) for x in rank_list])
 	norm_factor = torch.sum(abs(all_scores))
@@ -224,6 +230,7 @@ parameters with a score of zero.')
 		mask.append(((g / norm_factor) > acceptable_score).float())
 		
 	return mask,cum_sal
+
 
 
 def fill_zeros_in_kernel_mask(masked_model,mask,k):

@@ -1,10 +1,11 @@
 from subprocess import call
 
-config = 'configs/alexnet_config.py'
-layers = ['features_6']
-#layers = ['features_3','features_6','features_8','features_10']
+
+config = 'configs/inception_config.py'
+layers = ['conv2d2_pre_relu_conv','mixed5a_5x5_bottleneck_pre_relu_conv','mixed4e']
+#layers = ['features_6']
 data_path = 'image_data/imagenet_2/'
-units = range(369,384)
+units = range(1)
 device = 'cuda:0'
 
 
@@ -15,3 +16,5 @@ for unit in units:
         feature_target = {layer:[unit]}
         call_str = 'python snip_rank.py --unit %s --layer %s --config %s --data-path %s --device %s'%(str(unit),layer,config,data_path,device)
         call(call_str,shell=True)
+
+
