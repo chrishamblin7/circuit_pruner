@@ -10,8 +10,11 @@ from collections import OrderedDict
 from circuit_pruner.custom_exceptions import TargetReached
 import types
 from copy import deepcopy
+from math import log, exp, ceil
 from circuit_pruner.simple_api.target import feature_target_saver,sum_abs_loss
 from circuit_pruner.simple_api.mask import mask_from_scores, setup_net_for_mask, apply_mask
+from circuit_pruner.simple_api.util import params_2_target_in_layer
+from circuit_pruner.simple_api.dissected_Conv2d import *
 
 ####  SCORES ####
 
@@ -19,105 +22,104 @@ from circuit_pruner.simple_api.mask import mask_from_scores, setup_net_for_mask,
 Functions for computing saliency scores for parameters on models
 '''
 
-def snip_score(model,dataloader,layer_name,unit,layer_types_2_score = [nn.Conv2d,nn.Linear],loss_f = sum_abs_loss):
+def snip_score(model,dataloader,target_layer_name,unit,layer_types_2_score = [nn.Conv2d,nn.Linear],loss_f = sum_abs_loss):
 
+	_ = model.eval()
 	device = next(model.parameters()).device  
 	layers = OrderedDict([*model.named_modules()])
 
-	target_saver = feature_target_saver(model,layer_name,unit)
-	scores = OrderedDict()  
-	for i, data in enumerate(dataloader, 0):
+	#target_saver = feature_target_saver(model,layer_name,unit)
+	scores = OrderedDict()
+	with feature_target_saver(model,target_layer_name,unit) as target_saver:
+		for i, data in enumerate(dataloader, 0):
 
-		inputs, label = data
-		inputs = inputs.to(device)
-		#label = label.to(device)
+			inputs, label = data
+			inputs = inputs.to(device)
+			#label = label.to(device)
 
-		model.zero_grad() #very import!
-		try:
-			output = model(inputs)
-		except TargetReached:
-			pass
+			model.zero_grad() #very import!
+			target_activations = target_saver(inputs)
 
-		#import pdb; pdb.set_trace()
+			#feature collapse
+			loss = loss_f(target_activations)
+			loss.backward()
 
-		#feature collapse
-		loss = loss_f(target_saver.target)
-		loss.backward()
+			#get weight-wise scores
+			for layer_name,layer in layers.items():
+				if type(layer) not in layer_types_2_score:
+					continue
+					
+				if layer.weight.grad is None:
+					continue
 
-		#print(str(float(loss))+',')
-		#if float(loss) == 7.885214328765869:
-		#	import pdb; pdb.set_trace()
+				try: #does the model have a weight mask?
+					#scale scores by batch size (*inputs.shape)
+					layer_scores = torch.abs(layer.weight_mask.grad).detach().cpu()*inputs.shape[0]
 
-		#get weight-wise scores
-		for layer_name,layer in layers.items():
-			if type(layer) not in layer_types_2_score:
-				continue
+				except:
+					layer_scores = torch.abs(layer.weight*layer.weight.grad).detach().cpu()*inputs.shape[0]
+
 				
-			if layer.weight.grad is None:
-				continue
-			
-			if layer_name not in scores.keys():
-				scores[layer_name] = torch.abs(layer.weight*layer.weight.grad).detach().cpu()/inputs.shape[0]
-			#else:
-			#	scores[layer_name] += torch.abs(layer.weight*layer.weight.grad).detach().cpu()/inputs.shape[0]
-				
+				if layer_name not in scores.keys():
+					scores[layer_name] = layer_scores
+				else:
+					scores[layer_name] += layer_scores
+					
 	# # eliminate layers with stored but all zero scores
-	#print('layers eliminated with zero score')
 	remove_keys = []
 	for layer in scores:
 		if torch.sum(scores[layer]) == 0.:
-			print(layer)
 			remove_keys.append(layer)
-	for k in remove_keys:
-		del scores[k]
+	if len(remove_keys) > 0: 
+		print('removing layers from scores with scores all 0:')
+		for k in remove_keys:
+			print(k)
+			del scores[k]
 		  
-	target_saver.hook.remove() # this is important or we will accumulate hooks in our model
+	#target_saver.hook.remove() # this is important or we will accumulate hooks in our model
 	model.zero_grad() 
 
 	return scores
 
 
-def force_score(model, dataloader, feature_targets = None,feature_targets_coefficients = None,keep_ratio=.1, T=10, num_params_to_keep=None, structure='weights'):    #progressive skeletonization
-	
+def force_score(model, dataloader,target_layer_name,unit,keep_ratio=.1, T=10, num_params_to_keep=None, structure='weights',layer_types_2_score = [nn.Conv2d,nn.Linear],loss_f = sum_abs_loss, apply_final_mask = True):    #progressive skeletonization
+	'''
+	TO DO: This does not currently work with structured pruning, when target
+	is a linear layer.
+	'''
+
 	assert structure in ('weights','kernels','filters')
 
 	device = next(model.parameters()).device  
 	
 
-	_ = model.to(device).eval()
+	_ = model.eval()
 
-	net = net.to(device).eval()	
-	for param in net.parameters():
+	for param in model.parameters():
 		param.requires_grad = False
 	
-	if setup_net:
-		setup_net_for_circuit_prune(net, feature_targets=feature_targets, score_field = score_field)
-	
-	
-	#get total params given feature target might exclude some of network
-	total_params = 0
+	setup_net_for_mask(model)
+	layers = OrderedDict([*model.named_modules()])
 
-	for layer in net.modules():
-		if structure == 'weights' and (isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear)):
-			if not layer.last_layer:  #all params potentially important
-				total_params += len(layer.weight.flatten())
-			else:    #only weights leading into feature targets are important
-				total_params += len(layer.feature_targets_indices)*int(layer.weight.shape[1])
-				break
-		elif isinstance(layer, nn.Conv2d):
-			if not layer.last_layer:  #all params potentially important
-				if structure == 'kernels':
-					total_params += int(layer.weight.shape[0]*layer.weight.shape[1])
-				else:
-					total_params += int(layer.weight.shape[0])
-					
-			else: #only weights leading into feature targets are important
-				if structure == 'kernels':
-					total_params += int(len(layer.feature_targets_indices)*layer.weight.shape[1])
-				else:
-					total_params += len(layer.feature_targets_indices)
-				
-				break
+
+	#before getting the schedule of sparsities well get the total
+	#parameters into the target by running the scoring function once
+
+	scores = snip_score(model,dataloader,target_layer_name,unit,layer_types_2_score = layer_types_2_score, loss_f = loss_f)
+	if structure in ['kernels','filters']:
+		structured_scores = structure_scores(scores, model, structure=structure)
+	else:
+		structured_scores = scores
+
+	#total params
+	total_params = 0
+	for layer_name, layer_scores in structured_scores.items():
+		if layer_name == target_layer_name:
+			#EDIT, this might not be general in cases like branching models
+			#only weights leading into feature targets are important
+			total_params += params_2_target_in_layer(unit,layers[layer_name])
+		else:
+			total_params += torch.numel(layer_scores)
 	
 	if num_params_to_keep is None:
 		num_params_to_keep = ceil(keep_ratio*total_params)
@@ -133,6 +135,8 @@ def force_score(model, dataloader, feature_targets = None,feature_targets_coeffi
 		print('num params to keep > total params, no pruning to do')
 		return
 
+	
+	#iteratively apply mask and score
 	print("Pruning with %s pruning steps"%str(T))
 	for t in range(1,T+1):
 		
@@ -141,31 +145,108 @@ def force_score(model, dataloader, feature_targets = None,feature_targets_coeffi
 		k = ceil(exp(t/T*log(num_params_to_keep)+(1-t/T)*log(total_params))) #exponential schedulr
 		 
 		print('%s params'%str(k))
-		
+
+		#mask model
+		mask = mask_from_scores(structured_scores,num_params_to_keep=k)
+		apply_mask(model,mask,zero_absent=False)
+
 		#SNIP
-		if not return_scores:
-			struct_mask = circuit_SNIP(net, dataloader, num_params_to_keep=k, feature_targets = feature_targets, feature_targets_coefficients = feature_targets_coefficients, use_abs_scores = use_abs_scores, structure=structure, mask=mask, full_dataset = full_dataset, device=device,setup_net=False)
+		scores = snip_score(model,dataloader,target_layer_name,unit,layer_types_2_score = layer_types_2_score, loss_f = loss_f)
+		if structure in ['kernels','filters']:
+			structured_scores = structure_scores(scores, model, structure=structure)
 		else:
-			grads,struct_mask = circuit_SNIP(net, dataloader, num_params_to_keep=k, feature_targets = feature_targets, feature_targets_coefficients = feature_targets_coefficients, use_abs_scores = use_abs_scores, structure=structure, mask=mask, full_dataset = full_dataset, device=device,setup_net=False,return_scores=True)
-		if structure is not 'weights':
-			mask = expand_structured_mask(struct_mask,net) #this weight mask will get applied to the network on the next iteration
-		else:
-			mask = struct_mask
+			structured_scores = scores
 
-	apply_mask(net,mask)
+	#do we alter the final model to have the mask 
+	# prescribed by FORCE, or keep it unmasked?
+	if apply_final_mask:
+		'applying final mask to model'
+		mask = mask_from_scores(structured_scores,num_params_to_keep=k)
+		apply_mask(model,mask,zero_absent=False)
 
-	mask_total = 0
-	mask_ones = 0
-	for l in mask:
-		mask_ones += int(torch.sum(l))
-		mask_total += int(torch.numel(l))
-	print('final mask: %s/%s params (%s)'%(mask_ones,mask_total,mask_ones/mask_total))
-
-
-	if not return_scores:
-		return struct_mask
+		#print about final mask
+		mask_ones = 0
+		for layer_name,layer_mask in mask.items():
+			mask_ones += int(torch.sum(layer_mask))
+		print('final mask: %s/%s params (%s)'%(mask_ones,total_params,mask_ones/total_params))
 	else:
-		return grads,struct_mask
+		'keeping model unmasked'
+		setup_net_for_mask(model) #sets mask to all 1s
+
+
+	return structured_scores
+
+
+
+def actgrad_kernel_score(model,dataloader,target_layer_name,unit,loss_f = sum_abs_loss):
+
+	_ = model.eval()
+	device = next(model.parameters()).device 
+
+	dis_model = dissect_model(deepcopy(model))
+	_ = dis_model.to(device).eval()
+
+	model.to('cpu') #we need as much memory as we can get
+
+	all_layers = OrderedDict([*dis_model.named_modules()])
+	dissected_layers = OrderedDict()
+
+	for layer_name, layer in all_layers.items():
+		if isinstance(layer,dissected_Conv2d):
+			dissected_layers[layer_name] = layer
+
+	#target_saver = feature_target_saver(model,layer_name,unit)
+	scores = OrderedDict()
+	with feature_target_saver(dis_model,target_layer_name,unit) as target_saver:
+		for i, data in enumerate(dataloader, 0):
+			print('batch: '+str(i))
+			inputs, label = data
+			inputs = inputs.to(device)
+			#label = label.to(device)
+
+			dis_model.zero_grad() #very import!
+			target_activations = target_saver(inputs)
+
+			#feature collapse
+			loss = loss_f(target_activations)
+			loss.backward()
+
+			#get weight-wise scores
+			for layer_name,layer in dissected_layers.items():
+
+				if layer.kernel_scores is None:
+					if layer_name in scores.keys():
+						raise Exception('kernel scores for %s not stored for batch %s'%(layer_name,str(i)))
+					else:
+						continue
+
+
+				layer_scores = layer.kernel_scores
+				
+				if layer_name not in scores.keys():
+					scores[layer_name] = layer_scores
+				else:
+					scores[layer_name] += layer_scores
+					
+	# # eliminate layers with stored but all zero scores
+	remove_keys = []
+	for layer in scores:
+		if torch.sum(scores[layer]) == 0.:
+			remove_keys.append(layer)
+	if len(remove_keys) > 0: 
+		print('removing layers from scores with scores all 0:')
+		for k in remove_keys:
+			print(k)
+			del scores[k]
+		  
+	del dis_model #might be redundant
+
+	return scores
+
+
+
+
+
 
 
 #### Score manipulations #####
@@ -199,6 +280,8 @@ def minmax_norm_scores(scores, min=0, max=1):
 		out_scores[layer_name] = (scores - old_min)/(old_max - old_min)*(max - min) + min
 
 	return out_scores
+
+
 
 
 
