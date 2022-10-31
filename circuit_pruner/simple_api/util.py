@@ -1,4 +1,26 @@
 import torch
+from collections import OrderedDict
+from math import ceil
+
+
+def params_2_target_from_scores(scores,unit,target_layer_name,model):
+    #total params
+    all_layers = OrderedDict([*model.named_modules()])
+
+    total_params = 0
+    for layer_name, layer_scores in scores.items():
+        layer = all_layers[layer_name]
+        if layer_name == target_layer_name or layer_name == next(reversed(scores)): #not all weights matter, only those leading to target
+            if isinstance(unit,int):
+                dims = 1
+            else:
+                dims = torch.sum(torch.tensor(unit) != 0)
+            #EDIT this might not be general
+            total_params += int(torch.numel(layer.weight)/layer.weight.shape[0]*dims) 
+        else:
+            total_params += torch.numel(layer_scores)
+
+    return total_params
 
 def params_2_target_in_layer(unit,layer):
     '''

@@ -8,6 +8,7 @@ from torch import Tensor
 from typing import Dict, Iterable, Callable
 from collections import OrderedDict
 from circuit_pruner.custom_exceptions import TargetReached
+from circuit_pruner.simple_api.util import params_2_target_from_scores
 import types
 from copy import deepcopy
 
@@ -17,8 +18,9 @@ from copy import deepcopy
 Functions for masking the network, given scores
 '''
 
-def mask_from_scores(scores,sparsity=None,num_params_to_keep=None):
+def mask_from_scores(scores, sparsity=None,num_params_to_keep=None,model = None,unit=None,target_layer_name=None):
 	assert not ((sparsity is None) and (num_params_to_keep is None))
+	assert not ((model is None or unit is None or target_layer_name is None) and (num_params_to_keep is None))
 
 	keep_masks = {}
 	
@@ -31,7 +33,8 @@ def mask_from_scores(scores,sparsity=None,num_params_to_keep=None):
 	if not num_params_to_keep is None:
 		k = num_params_to_keep
 	else:
-		k = int(len(scores_flat) * sparsity)
+		total_params = params_2_target_from_scores(scores,unit,target_layer_name,model)
+		k = int(total_params * sparsity)
 
 	#get threshold score
 	threshold, _ = torch.topk(scores_flat, k, sorted=True)

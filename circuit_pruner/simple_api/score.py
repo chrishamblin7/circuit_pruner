@@ -13,7 +13,7 @@ from copy import deepcopy
 from math import log, exp, ceil
 from circuit_pruner.simple_api.target import feature_target_saver,sum_abs_loss
 from circuit_pruner.simple_api.mask import mask_from_scores, setup_net_for_mask, apply_mask
-from circuit_pruner.simple_api.util import params_2_target_in_layer
+from circuit_pruner.simple_api.util import params_2_target_from_scores
 from circuit_pruner.simple_api.dissected_Conv2d import *
 
 ####  SCORES ####
@@ -82,7 +82,7 @@ def snip_score(model,dataloader,target_layer_name,unit,layer_types_2_score = [nn
 	return scores
 
 
-def force_score(model, dataloader,target_layer_name,unit,keep_ratio=.1, T=10, num_params_to_keep=None, structure='weights',layer_types_2_score = [nn.Conv2d,nn.Linear],loss_f = sum_abs_loss, apply_final_mask = True):    #progressive skeletonization
+def force_score(model, dataloader,target_layer_name,unit,keep_ratio=.1, T=10, num_params_to_keep=None, structure='weights',layer_types_2_score = [nn.Conv2d,nn.Linear],loss_f = sum_abs_loss, apply_final_mask = True, min_max=False):    #progressive skeletonization
 	'''
 	TO DO: This does not currently work with structured pruning, when target
 	is a linear layer.
@@ -95,8 +95,6 @@ def force_score(model, dataloader,target_layer_name,unit,keep_ratio=.1, T=10, nu
 
 	_ = model.eval()
 
-	for param in model.parameters():
-		param.requires_grad = False
 	
 	setup_net_for_mask(model)
 	layers = OrderedDict([*model.named_modules()])
@@ -111,15 +109,20 @@ def force_score(model, dataloader,target_layer_name,unit,keep_ratio=.1, T=10, nu
 	else:
 		structured_scores = scores
 
+	if min_max:
+		structured_scores = minmax_norm_scores(structured_scores)
+
 	#total params
-	total_params = 0
-	for layer_name, layer_scores in structured_scores.items():
-		if layer_name == target_layer_name:
-			#EDIT, this might not be general in cases like branching models
-			#only weights leading into feature targets are important
-			total_params += params_2_target_in_layer(unit,layers[layer_name])
-		else:
-			total_params += torch.numel(layer_scores)
+	# total_params = 0
+	# for layer_name, layer_scores in structured_scores.items():
+	# 	if layer_name == target_layer_name:
+	# 		#EDIT, this might not be general in cases like branching models
+	# 		#only weights leading into feature targets are important
+	# 		total_params += params_2_target_in_layer(unit,layers[layer_name])
+	# 	else:
+	# 		total_params += torch.numel(layer_scores)
+
+	total_params = params_2_target_from_scores(structured_scores,unit,target_layer_name,model)
 	
 	if num_params_to_keep is None:
 		num_params_to_keep = ceil(keep_ratio*total_params)
@@ -156,6 +159,9 @@ def force_score(model, dataloader,target_layer_name,unit,keep_ratio=.1, T=10, nu
 			structured_scores = structure_scores(scores, model, structure=structure)
 		else:
 			structured_scores = scores
+		
+		if min_max:
+			structured_scores = minmax_norm_scores(structured_scores)
 
 	#do we alter the final model to have the mask 
 	# prescribed by FORCE, or keep it unmasked?
@@ -199,7 +205,7 @@ def actgrad_kernel_score(model,dataloader,target_layer_name,unit,loss_f = sum_ab
 	scores = OrderedDict()
 	with feature_target_saver(dis_model,target_layer_name,unit) as target_saver:
 		for i, data in enumerate(dataloader, 0):
-			print('batch: '+str(i))
+			#print('batch: '+str(i))
 			inputs, label = data
 			inputs = inputs.to(device)
 			#label = label.to(device)
@@ -227,6 +233,16 @@ def actgrad_kernel_score(model,dataloader,target_layer_name,unit,loss_f = sum_ab
 					scores[layer_name] = layer_scores
 				else:
 					scores[layer_name] += layer_scores
+
+	#reshape scores to in-out dimensions
+	flattened_scores = OrderedDict()
+	for layer_name, score in scores.items():
+		flattened_scores[layer_name] = dissected_layers[layer_name].unflatten_kernel_scores( scores = scores[layer_name])
+
+	del scores
+	scores = flattened_scores
+
+
 					
 	# # eliminate layers with stored but all zero scores
 	remove_keys = []
@@ -238,14 +254,13 @@ def actgrad_kernel_score(model,dataloader,target_layer_name,unit,loss_f = sum_ab
 		for k in remove_keys:
 			print(k)
 			del scores[k]
-		  
+
+
+	for layer_name, layer in dissected_layers.items():
+		layer.kernel_scores = None
 	del dis_model #might be redundant
 
 	return scores
-
-
-
-
 
 
 
@@ -264,7 +279,7 @@ def structure_scores(scores, model, structure='kernels'):
 	else:
 		collapse_dims = (1,2,3)
 		
-	structured_scores = {}
+	structured_scores = OrderedDict()
 	for layer_name in scores:
 		if isinstance(layers[layer_name],nn.Conv2d):
 			structured_scores[layer_name] = torch.mean(scores[layer_name],dim=collapse_dims)
@@ -273,7 +288,7 @@ def structure_scores(scores, model, structure='kernels'):
 		
 
 def minmax_norm_scores(scores, min=0, max=1):
-	out_scores = {}
+	out_scores = OrderedDict()
 	for layer_name, scores in scores.items():
 		old_min = torch.min(scores)
 		old_max = torch.max(scores)
