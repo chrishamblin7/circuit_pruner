@@ -44,6 +44,17 @@ preprocess =  transforms.Compose([
                                      	 			 std=[0.229, 0.224, 0.225])])
 
 
+
+#targets
+layers = ['mixed4a_5x5_pre_relu_conv','mixed4a_1x1_pre_relu_conv','mixed4a_3x3_pre_relu_conv','mixed4a_pool_reduce_pre_relu_conv',
+          'mixed4b_5x5_pre_relu_conv','mixed4b_1x1_pre_relu_conv','mixed4b_3x3_pre_relu_conv','mixed4b_pool_reduce_pre_relu_conv',
+          'mixed4d_5x5_pre_relu_conv','mixed4d_1x1_pre_relu_conv','mixed4d_3x3_pre_relu_conv','mixed4d_pool_reduce_pre_relu_conv',
+          'mixed3a_5x5_pre_relu_conv','mixed3a_1x1_pre_relu_conv','mixed3a_3x3_pre_relu_conv','mixed3a_pool_reduce_pre_relu_conv',
+          'mixed5a_5x5_pre_relu_conv','mixed5a_1x1_pre_relu_conv','mixed5a_3x3_pre_relu_conv','mixed5a_pool_reduce_pre_relu_conv',
+         ]
+
+units = range(4)
+
 #GPU
 device = 'cuda:0'
 

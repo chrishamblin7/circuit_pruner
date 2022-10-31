@@ -1,4 +1,4 @@
-### Config File for Alexnet Sparse. ###
+### Config File for vgg11. ###
 
 
 import torch
@@ -8,16 +8,16 @@ from circuit_pruner import root_path
 
 ### NAME ###
 
-name = 'resnet18'
+name = 'vgg11_bn'
 
 
 ###MODEL###
 
 
-from torchvision.models import resnet18
+from torchvision.models import vgg11_bn
 import torch.nn as nn
 
-model = resnet18(pretrained=True)
+model = vgg11_bn(pretrained=True)
 
 
 ###DATA PATH###
@@ -44,15 +44,10 @@ preprocess =  transforms.Compose([
                                      	 			 std=[0.229, 0.224, 0.225])])
 
 
-
-
 #targets
-layers = ['layer2.0.conv1','layer2.0.conv2','layer2.1.conv1','layer2.1.conv2',
-          'layer3.0.conv1','layer3.0.conv2','layer3.1.conv1','layer3.1.conv2',
-          'layer4.0.conv1','layer4.0.conv2','layer4.1.conv1','layer4.1.conv2',]  
+layers = ['features.16','features.13','features.11','features.8','features.6']
 
-units = range(7)
-
+units = range(16)
 
 #GPU
 device = 'cuda:0'
@@ -61,4 +56,4 @@ device = 'cuda:0'
 #AUX 
 num_workers = 4     #num workers argument in dataloader
 seed = 2            #manual seed
-batch_size = 200   #batch size for feeding rank image set through model (input image set is sent through all at once)
+batch_size = 1   #batch size for feeding rank image set through model (input image set is sent through all at once)
