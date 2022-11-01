@@ -45,7 +45,7 @@ preprocess =  transforms.Compose([
 
 
 #targets
-layers = ['features.16','features.13','features.11','features.8','features.6']
+layers = ['features.22','features.18','features.15','features.11','features.8']
 
 units = range(16)
 
