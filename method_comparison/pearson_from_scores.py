@@ -16,12 +16,12 @@ import pickle
 
 
 #params
-config_file = '../configs/resnet18_config.py'
-scores_folder = '/mnt/data/chris/nodropbox/Projects/circuit_pruner/circuit_ranks/resnet18/imagenet_2/actxgrad/'
-out_folder = './resnet18/circuit_activations/'
-device = 'cuda:0'
+config_file = '../configs/vgg11_bn_config.py'
+scores_folder = '/mnt/data/chris/nodropbox/Projects/circuit_pruner/circuit_ranks/vgg11_bn/imagenet_2/actxgrad/'
+out_folder = './vgg11_bn/circuit_activations/'
+device = 'cuda:2'
 batch_size = 64
-sparsities = [.5,.4,.3,.2,.1,.05,.01]
+sparsities = [.9,.8,.7,.6,.5,.4,.3,.2,.1,.05,.01]
 
 #model
 config = load_config(config_file)
@@ -39,7 +39,9 @@ dataloader = torch.utils.data.DataLoader(rank_image_data(config.data_path,
 										**kwargs)
 
 
-all_correlations = OrderedDict()
+if not os.path.exists(out_folder):
+    os.makedirs(out_folder, exist_ok=True)
+
 
 #get data
 score_files = os.listdir(scores_folder)
@@ -48,9 +50,9 @@ for score_file in score_files:
 
 	#import pdb;pdb.set_trace()
 	print(score_file)
-	if os.path.exists(out_folder+score_file):
-		print('skipping')
-		continue
+	#if os.path.exists(out_folder+score_file):
+	#	print('skipping')
+	#	continue
 	score_dict = torch.load(os.path.join(scores_folder,score_file))
 	unit = score_dict['unit']
 	target_layer = score_dict['layer']
@@ -112,14 +114,15 @@ for score_file in score_files:
 	for a in circuit_activations: 
 		correlations.append(np.corrcoef(a.flatten(),original_activations.flatten())[0][1])
 
-	all_correlations[score_file] = correlations
+	#all_correlations[score_file] = correlations
 
 	save_object = {'original_activations':original_activations,
 				   'circuit_activations':circuit_activations,
-				   'correlations':correlations}
+				   'correlations':correlations,
+				   'sparsities':sparsities}
 
 	torch.save(save_object,out_folder+score_file)
 
 	print(time()-start)
 
-torch.save(all_correlations,'resnet18_all_correlations.pt')
+#torch.save(all_correlations,'resnet18_all_correlations.pt')
