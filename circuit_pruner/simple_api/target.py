@@ -82,7 +82,7 @@ class multi_feature_target_saver(nn.Module):
         with multi_feature_target_saver(model, layer_name) as target_saver:
             ... run images through model
     '''
-    def __init__(self, model, targets, kill_forward = True):
+    def __init__(self, model, targets, kill_forward = True, device=None):
         super().__init__()
         self.model = model
         self.targets = targets
@@ -92,6 +92,7 @@ class multi_feature_target_saver(nn.Module):
         self.hooks = {}
         self.hooks_called = {}  #works in conjunction with kill_forward
         self.kill_forward = kill_forward
+        self.device = device
 
 
     def hook_layers(self):        
@@ -126,6 +127,9 @@ class multi_feature_target_saver(nn.Module):
                 target_activations = torch.tensordot(output, unit, dims=([1],[0]))
 
             self.target_activations[target_name] = target_activations
+
+            if self.device is not None:
+                self.target_activations[target_name] = self.target_activations[target_name].detach().to(self.device)
 
             self.hooks_called[target_name] = True
 

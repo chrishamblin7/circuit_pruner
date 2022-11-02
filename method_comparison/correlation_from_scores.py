@@ -16,12 +16,17 @@ import pickle
 
 
 #params
-config_file = '../configs/vgg11_bn_config.py'
-scores_folder = '/mnt/data/chris/nodropbox/Projects/circuit_pruner/circuit_ranks/vgg11_bn/imagenet_2/actxgrad/'
-out_folder = './vgg11_bn/circuit_activations/'
+name = 'vgg11_bn'
+method = 'actxgrad'
+dataset_name = 'imagenet_2'
+config_file = '../configs/%s_config.py'%name
+scores_folder = '/mnt/data/chris/nodropbox/Projects/circuit_pruner/circuit_ranks/%s/%s/%s/'%(name,dataset_name,method)
+out_folder_root = '/mnt/data/chris/nodropbox/Projects/circuit_pruner/correlations/'
 device = 'cuda:2'
 batch_size = 64
-sparsities = [.9,.8,.7,.6,.5,.4,.3,.2,.1,.05,.01]
+sparsities = [.9,.8,.7,.6,.5,.4,.3,.2,.1,.05,.01,.005,.001]
+original_activations_file = None
+save_activations = False
 
 #model
 config = load_config(config_file)
@@ -39,8 +44,8 @@ dataloader = torch.utils.data.DataLoader(rank_image_data(config.data_path,
 										**kwargs)
 
 
-if not os.path.exists(out_folder):
-    os.makedirs(out_folder, exist_ok=True)
+if not os.path.exists(out_folder_root):
+    os.makedirs(out_folder_root, exist_ok=True)
 
 
 #get data
@@ -59,22 +64,28 @@ for score_file in score_files:
 	scores = score_dict['scores']
 
 	setup_net_for_mask(model) #reset mask in net
-	#original_activations
-	original_activations = []
-	print('original activations')
-	#we save target activations in a context that allows us to handle the annoying problem of dangling hooks
-	with feature_target_saver(model,target_layer,unit) as target_saver:
-		#then we just run our data through the model, the target_saver will store activations for us
-		for i, data in enumerate(dataloader, 0):
-			inputs, labels = data
-			inputs = inputs.to(device)
-			target_activations = target_saver(inputs)
-			#the target_saver doesnt aggregate activations, it overwrites each batch, so we need to save our data
-			original_activations.append(target_activations.detach().cpu().type(torch.FloatTensor))
 
-		#turn batch-wise list into concatenated tensor
-		original_activations = torch.cat(original_activations)
-	
+	#original_activations
+	if original_activations_file is None:
+
+		original_activations = []
+		print('getting original activations')
+		#we save target activations in a context that allows us to handle the annoying problem of dangling hooks
+		with feature_target_saver(model,target_layer,unit) as target_saver:
+			#then we just run our data through the model, the target_saver will store activations for us
+			for i, data in enumerate(dataloader, 0):
+				inputs, labels = data
+				inputs = inputs.to(device)
+				target_activations = target_saver(inputs)
+				#the target_saver doesnt aggregate activations, it overwrites each batch, so we need to save our data
+				original_activations.append(target_activations.detach().cpu().type(torch.FloatTensor))
+
+			#turn batch-wise list into concatenated tensor
+			original_activations = torch.cat(original_activations)
+	else:
+		print('fetching original activations from file: %s'%original_activations_file)
+		original_activations = torch.load(original_activations_file)
+		original_activations = original_activations[target_layer+':'+str(unit)]	
 
 	circuit_activations = []
 	with feature_target_saver(model,target_layer,unit) as target_saver:
@@ -116,12 +127,21 @@ for score_file in score_files:
 
 	#all_correlations[score_file] = correlations
 
-	save_object = {'original_activations':original_activations,
-				   'circuit_activations':circuit_activations,
-				   'correlations':correlations,
-				   'sparsities':sparsities}
+	save_object = {'correlations':correlations,
+				   'sparsities':sparsities,
+				   'unit':unit,
+				   'layer':target_layer}
 
-	torch.save(save_object,out_folder+score_file)
+	if save_activations:
+		save_object['circuit_activations'] = circuit_activations
+		save_object['original_activations'] = original_activations
+
+
+
+	folder_path = out_folder_root+'/'+name+'/'+dataset_name+'/'+method+'/'
+	if not os.path.exists(folder_path):
+		os.makedirs(folder_path,exist_ok=True)
+	torch.save(save_object,folder_path+score_file)
 
 	print(time()-start)
 

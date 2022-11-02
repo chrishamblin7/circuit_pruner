@@ -82,7 +82,7 @@ def snip_score(model,dataloader,target_layer_name,unit,layer_types_2_score = [nn
 	return scores
 
 
-def force_score(model, dataloader,target_layer_name,unit,keep_ratio=.1, T=10, num_params_to_keep=None, structure='weights',layer_types_2_score = [nn.Conv2d,nn.Linear],loss_f = sum_abs_loss, apply_final_mask = True, min_max=False):    #progressive skeletonization
+def force_score(model, dataloader,target_layer_name,unit,keep_ratio=.1, T=10, num_params_to_keep=None, structure='kernels',layer_types_2_score = [nn.Conv2d,nn.Linear],loss_f = sum_abs_loss, apply_final_mask = True, min_max=False):    #progressive skeletonization
 	'''
 	TO DO: This does not currently work with structured pruning, when target
 	is a linear layer.
