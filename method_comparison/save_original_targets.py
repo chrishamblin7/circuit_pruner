@@ -8,13 +8,13 @@ from circuit_pruner.data_loading import rank_image_data
 from circuit_pruner.simple_api.target import multi_feature_target_saver
 import os
 
-config_file = '../configs/inception_config.py'
+config_file = '../configs/vgg11_config.py'
 device = 'cuda:0'
 
 config = load_config(config_file)
 layers = config.layers
 units = config.units
-batch_size = config.batch_size
+batch_size = 64
 data_path = config.data_path
 model = config.model
 _ = model.eval().to(device)

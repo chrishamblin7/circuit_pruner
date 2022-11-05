@@ -11,22 +11,24 @@ from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
 from circuit_pruner.simple_api.mask import mask_from_scores, apply_mask,setup_net_for_mask
 from circuit_pruner.simple_api.target import feature_target_saver, sum_abs_loss
+from circuit_pruner.simple_api.score import magnitude_scores_from_scores, random_scores_from_scores
 from time import time
 import pickle
 
 
 #params
-name = 'vgg11'
-method = 'actxgrad'
+name = 'resnet18'
 dataset_name = 'imagenet_2'
 config_file = '../configs/%s_config.py'%name
-scores_folder = '/mnt/data/chris/nodropbox/Projects/circuit_pruner/circuit_scores/%s/%s/%s/'%(name,dataset_name,method)
+snip_scores_folder = '/mnt/data/chris/nodropbox/Projects/circuit_pruner/circuit_scores/%s/%s/snip/'%(name,dataset_name)
 out_folder_root = '/mnt/data/chris/nodropbox/Projects/circuit_pruner/correlations/'
-device = 'cuda:2'
+device = 'cuda:0'
 batch_size = 64
 sparsities = [.9,.8,.7,.6,.5,.4,.3,.2,.1,.05,.01,.005,.001]
 original_activations_file = '/mnt/data/chris/nodropbox/Projects/circuit_pruner/original_activations/%s/%s/original_activations.pt'%(name,dataset_name)
 save_activations = False
+structure = 'kernels'
+score_kinds = ['magnitude','random'] #choices are magnitude and random
 
 #model
 config = load_config(config_file)
@@ -45,23 +47,22 @@ dataloader = torch.utils.data.DataLoader(rank_image_data(config.data_path,
 
 
 if not os.path.exists(out_folder_root):
-    os.makedirs(out_folder_root, exist_ok=True)
+	os.makedirs(out_folder_root, exist_ok=True)
 
 
 #get data
-score_files = os.listdir(scores_folder)
+score_files = os.listdir(snip_scores_folder)
 for score_file in score_files: 
 	start = time()
 
-	#import pdb;pdb.set_trace()
 	print(score_file)
 	#if os.path.exists(out_folder+score_file):
 	#	print('skipping')
 	#	continue
-	score_dict = torch.load(os.path.join(scores_folder,score_file))
+	score_dict = torch.load(os.path.join(snip_scores_folder,score_file))
 	unit = score_dict['unit']
 	target_layer = score_dict['layer']
-	scores = score_dict['scores']
+	snip_scores = score_dict['scores']
 
 	setup_net_for_mask(model) #reset mask in net
 
@@ -87,65 +88,80 @@ for score_file in score_files:
 		original_activations = torch.load(original_activations_file)
 		original_activations = original_activations[target_layer+':'+str(unit)]	
 
-	circuit_activations = []
-	with feature_target_saver(model,target_layer,unit) as target_saver:
-		for sparsity in sparsities:
-		#for sparsity in sparsities[cat]:
-			print(sparsity)
 
-			#MASK THE MODEL
-			mask = mask_from_scores(scores,sparsity = sparsity,model=model,unit=unit,target_layer_name=target_layer)
-			apply_mask(model,mask)
+	#get magnitude/random scores
+	scores = {}
+	for score_kind in score_kinds: 
+		if score_kind == 'magnitude':
+			scores[score_kind] = magnitude_scores_from_scores(snip_scores,model,target_layer,unit)
+		elif score_kind == 'random':
+			scores[score_kind] = random_scores_from_scores(snip_scores,target_layer,unit)
+	del snip_scores
 
-			activations = []
-			#then we just run our data through the model, the target_saver will store activations for us
-			for i, data in enumerate(dataloader, 0):
-				model.zero_grad()
+	for score_kind in score_kinds:
+		#get activations 
+		print('getting %s score correlations'%score_kind)
+		circuit_activations = []
+		with feature_target_saver(model,target_layer,unit) as target_saver:
+			for sparsity in sparsities:
+			#for sparsity in sparsities[cat]:
+				print(sparsity)
 
-				inputs, target = data
-				inputs = inputs.to(device)
-				target = target.to(device)
+				#MASK THE MODEL
+				mask = mask_from_scores(scores[score_kind],sparsity = sparsity,model=model,unit=unit,target_layer_name=target_layer)
+				apply_mask(model,mask)
 
-				target_activations = target_saver(inputs)
-				#import pdb; pdb.set_trace()
-				#loss = sum_abs_loss(target_activations)
-				#loss.backward()
-				
-				#save activations
-				activations.append(target_activations.detach().cpu().type(torch.FloatTensor))
-				
+				activations = []
+				#then we just run our data through the model, the target_saver will store activations for us
+				for i, data in enumerate(dataloader, 0):
+					model.zero_grad()
 
-			#turn batch-wise list into concatenated tensor
-			activations = torch.cat(activations)
-			circuit_activations.append(activations)
+					inputs, target = data
+					inputs = inputs.to(device)
+					target = target.to(device)
 
+					target_activations = target_saver(inputs)
 
-	#correlations
-	correlations = []
-	for a in circuit_activations: 
-		correlations.append(np.corrcoef(a.flatten(),original_activations.flatten())[0][1])
+					
+					#save activations
+					activations.append(target_activations.detach().cpu().type(torch.FloatTensor))
+					
 
-	#all_correlations[score_file] = correlations
-
-	save_object = {'correlations':correlations,
-				   'sparsities':sparsities,
-				   'unit':unit,
-				   'layer':target_layer,
-				   'model':name,
-				   'method':method,
-				   'model':name}
-
-	if save_activations:
-		save_object['circuit_activations'] = circuit_activations
-		save_object['original_activations'] = original_activations
+				#turn batch-wise list into concatenated tensor
+				activations = torch.cat(activations)
+				circuit_activations.append(activations)
 
 
+		#correlations
+		correlations = []
+		for a in circuit_activations: 
+			correlations.append(np.corrcoef(a.flatten(),original_activations.flatten())[0][1])
 
-	folder_path = out_folder_root+'/'+name+'/'+dataset_name+'/'+method+'/'
-	if not os.path.exists(folder_path):
-		os.makedirs(folder_path,exist_ok=True)
-	torch.save(save_object,folder_path+score_file)
+		#all_correlations[score_file] = correlations
 
-	print(time()-start)
+		save_object = {'correlations':correlations,
+					'sparsities':sparsities,
+					'unit':unit,
+					'layer':target_layer,
+					'model':name,
+					'method':score_kind,
+					'model':name,
+					'structure':structure}
+
+		if save_activations:
+			save_object['circuit_activations'] = circuit_activations
+			save_object['original_activations'] = original_activations
+
+
+
+		folder_path = out_folder_root+'/'+name+'/'+dataset_name+'/'+score_kind+'/'
+		if not os.path.exists(folder_path):
+			os.makedirs(folder_path,exist_ok=True)
+		torch.save(save_object,folder_path+score_file)
+
+		print(time()-start)
+
+
+
 
 #torch.save(all_correlations,'resnet18_all_correlations.pt')

@@ -263,6 +263,48 @@ def actgrad_kernel_score(model,dataloader,target_layer_name,unit,loss_f = sum_ab
 	return scores
 
 
+def magnitude_scores_from_scores(scores,model,target_layer_name,unit):
+
+	'''
+	This function presumes you already have a scores file, and uses that
+	to make a magnitude scores file based on weights of model.
+	It uses a scores file (from 'snip' for example), so that it
+	can disregard weights dissconnected from the target
+	'''
+	_ = model.eval()
+	model_layers = OrderedDict([*model.named_modules()])
+	
+	mag_scores = OrderedDict()
+
+	for layer_name, layer_scores in scores.items():
+		layer = model_layers[layer_name]
+		if layer_name != target_layer_name:
+			w = layer.weight.detach().cpu()
+			w_abs = torch.abs(w)
+			mag_scores[layer_name] = w_abs 
+		else: #EDIT, only for basis units
+			w_empty = torch.zeros(layer.weight.shape).cpu()
+			w_unit = torch.abs(layer.weight[unit].detach().cpu())
+			w_empty[unit] = w_unit
+			mag_scores[layer_name] = w_empty
+
+	return mag_scores
+
+
+def random_scores_from_scores(scores,target_layer_name,unit):
+
+	random_scores = OrderedDict()
+
+	for layer_name, layer_scores in scores.items():
+		if layer_name != target_layer_name:
+			random_scores[layer_name] = torch.abs(torch.rand(layer_scores.shape))
+		else: #EDIT, only for basis units
+			scores_empty = torch.zeros(layer_scores.shape).cpu()
+			scores_empty[unit] = torch.abs(torch.rand(layer_scores[unit].shape))
+			random_scores[layer_name] = scores_empty
+
+	return random_scores
+
 
 #### Score manipulations #####
 '''
