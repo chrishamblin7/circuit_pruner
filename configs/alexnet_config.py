@@ -45,6 +45,10 @@ preprocess =  transforms.Compose([
                                      	 			 std=[0.229, 0.224, 0.225])])
 
 
+#targets
+layers = ['features.6','features.8','features.10']
+units = range(20)
+
 #GPU
 device = 'cuda:0'
 

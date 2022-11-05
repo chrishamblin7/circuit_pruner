@@ -47,7 +47,7 @@ preprocess =  transforms.Compose([
 #targets
 layers = ['features.22','features.18','features.15','features.11','features.8']
 
-units = range(16)
+units = range(20)
 
 #GPU
 device = 'cuda:0'
@@ -56,4 +56,4 @@ device = 'cuda:0'
 #AUX 
 num_workers = 4     #num workers argument in dataloader
 seed = 2            #manual seed
-batch_size = 1   #batch size for feeding rank image set through model (input image set is sent through all at once)
+batch_size = 64   #batch size for feeding rank image set through model (input image set is sent through all at once)

@@ -51,7 +51,7 @@ layers = ['layer2.0.conv1','layer2.0.conv2','layer2.1.conv1','layer2.1.conv2',
           'layer3.0.conv1','layer3.0.conv2','layer3.1.conv1','layer3.1.conv2',
           'layer4.0.conv1','layer4.0.conv2','layer4.1.conv1','layer4.1.conv2',]  
 
-units = range(7)
+units = range(20)
 
 
 #GPU
@@ -61,4 +61,4 @@ device = 'cuda:0'
 #AUX 
 num_workers = 4     #num workers argument in dataloader
 seed = 2            #manual seed
-batch_size = 200   #batch size for feeding rank image set through model (input image set is sent through all at once)
+batch_size = 128   #batch size for feeding rank image set through model (input image set is sent through all at once)
