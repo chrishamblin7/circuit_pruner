@@ -1,7 +1,7 @@
 #functions for using lucent to get visualizations
-from lucent_fresh.optvis import render
-from lucent_fresh.modelzoo.util import get_model_layers
-from lucent_fresh.optvis import render, param, transform, objectives
+from lucent_video.optvis import render
+from lucent_video.modelzoo.util import get_model_layers
+from lucent_video.optvis import render, param, transform, objectives
 
 import inspect
 import time
@@ -291,7 +291,7 @@ def fetch_deepviz_img_for_circuit(circuit,layer_name,within_id,targetid,device='
 def featviz_in_recep_field(model,feature_name,unit, input_dim = (3,224,224),image_name=None, margin = 10, device = 'cuda:0'):
 	from circuit_pruner.receptive_fields import receptive_field, receptive_field_for_unit
 	from math import ceil, floor
-	from lucent_fresh.optvis import render, param, transform, objectives
+	from lucent_video.optvis import render, param, transform, objectives
 	from copy import deepcopy
 	from circuit_pruner.dissected_Conv2d import dissect_model
 	from math import floor
@@ -320,7 +320,7 @@ def featviz_in_recep_field(model,feature_name,unit, input_dim = (3,224,224),imag
 	print(target_position)
 	recep_field = receptive_field_for_unit(all_recep_field_params, feature_name, target_position)
 	print(recep_field)
-	viz_im = viz_im[0][:,int(recep_field[0][0])-margin:int(recep_field[0][1])+margin,int(recep_field[1][0])-margin:int(recep_field[1][1])+margin,:]
+	viz_im = viz_im['images'][0][:,int(recep_field[0][0])-margin:int(recep_field[0][1])+margin,int(recep_field[1][0])-margin:int(recep_field[1][1])+margin,:]
 	#viz_im = viz_im[0][:,:,:,:]
 	image = (viz_im * 255).astype(np.uint8)
 	if len(image.shape) == 4:

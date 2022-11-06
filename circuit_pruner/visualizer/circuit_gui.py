@@ -224,7 +224,7 @@ def circuit_2_2d_circuit_diagram(circuit,mask,orig_model,ranks,num_hover_points=
 
 
 
-def gen_kernel_img(edge_name,model,viz_folder):
+def gen_kernel_img(edge_name,model,viz_folder,scale_colors = True):
 	kernels = get_model_conv_weights(model)
 	
 	in_filterid = int(edge_name.split('-')[0])
@@ -247,8 +247,8 @@ def gen_kernel_img(edge_name,model,viz_folder):
 				pad=0
 			))
 
-
-		fig =  go.Figure(data=go.Heatmap(z = kernel,
+		if not scale_colors:
+			fig =  go.Figure(data=go.Heatmap(z = kernel,
 										colorscale='RdBu',
 										reversescale=True,
 										zmid=0,
@@ -256,6 +256,21 @@ def gen_kernel_img(edge_name,model,viz_folder):
 										#zmax=.5,
 										showscale=False),
 						layout=kernel_layout)
+		else:
+			layer_max=float(torch.max(torch.abs(torch.max(kernels[out_layer]))))
+			kernel_max=float(np.max(np.abs(np.max(kernel))))
+			zmax = (layer_max+kernel_max)/2
+			zmin = -1*zmax
+			fig =  go.Figure(data=go.Heatmap(z = kernel,
+										colorscale='RdBu',
+										reversescale=True,
+										zmid=0,
+										zmin=zmin,
+										zmax=zmax,
+										showscale=False),
+						layout=kernel_layout)
+
+		
 		fig.update_xaxes(visible=False)
 		fig.update_yaxes(visible=False)
 		fig.update(layout_showlegend=False)
