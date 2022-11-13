@@ -17,18 +17,18 @@ import pickle
 
 
 #params
-name = 'resnet18'
+name = 'inception'
 dataset_name = 'imagenet_2'
 config_file = '../configs/%s_config.py'%name
 snip_scores_folder = '/mnt/data/chris/nodropbox/Projects/circuit_pruner/circuit_scores/%s/%s/snip/'%(name,dataset_name)
 out_folder_root = '/mnt/data/chris/nodropbox/Projects/circuit_pruner/correlations/'
-device = 'cuda:0'
-batch_size = 64
+device = 'cuda:2'
+batch_size = 40
 sparsities = [.9,.8,.7,.6,.5,.4,.3,.2,.1,.05,.01,.005,.001]
 original_activations_file = '/mnt/data/chris/nodropbox/Projects/circuit_pruner/original_activations/%s/%s/original_activations.pt'%(name,dataset_name)
 save_activations = False
 structure = 'kernels'
-score_kinds = ['magnitude','random'] #choices are magnitude and random
+score_kinds = ['magnitude'] #choices are magnitude and random
 
 #model
 config = load_config(config_file)
@@ -99,6 +99,10 @@ for score_file in score_files:
 	del snip_scores
 
 	for score_kind in score_kinds:
+		folder_path = out_folder_root+'/'+name+'/'+dataset_name+'/'+score_kind+'/'
+		if os.path.exists(folder_path+score_file):
+			print('skipping')
+			continue
 		#get activations 
 		print('getting %s score correlations'%score_kind)
 		circuit_activations = []

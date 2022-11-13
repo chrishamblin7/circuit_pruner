@@ -263,7 +263,7 @@ def actgrad_kernel_score(model,dataloader,target_layer_name,unit,loss_f = sum_ab
 	return scores
 
 
-def magnitude_scores_from_scores(scores,model,target_layer_name,unit):
+def magnitude_scores_from_scores(scores,model,target_layer_name,unit,structure='kernels'):
 
 	'''
 	This function presumes you already have a scores file, and uses that
@@ -287,6 +287,10 @@ def magnitude_scores_from_scores(scores,model,target_layer_name,unit):
 			w_unit = torch.abs(layer.weight[unit].detach().cpu())
 			w_empty[unit] = w_unit
 			mag_scores[layer_name] = w_empty
+		if structure == 'kernels':
+			mag_scores[layer_name] = mag_scores[layer_name].mean(dim=(2,3))
+		elif structure == 'filters':
+			mag_scores[layer_name] = mag_scores[layer_name].mean(dim=(1,2,3))
 
 	return mag_scores
 
