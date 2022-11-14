@@ -262,7 +262,7 @@ def fill_zeros_in_kernel_mask(masked_model,mask,k):
 	return mask
 
 
-def model_ranks_2_circuit_model(layer_ranks,sparsity,model,feature_targets,device,method='actxgrad',structure='edges',use_effective_mask=True,rank_field='image',zero_zeros=False):
+def model_ranks_2_circuit_model(layer_ranks,sparsity,model,feature_targets,device,method='actxgrad',structure='edges',use_effective_mask=True,rank_field='image',zero_zeros=False,no_first_layer_partial_mask=False):
 	if structure == 'kernels': structure='edges'
 	if structure == 'filters': structure='nodes'
 
@@ -360,6 +360,9 @@ def model_ranks_2_circuit_model(layer_ranks,sparsity,model,feature_targets,devic
 		expanded_mask = expand_structured_mask(mask,masked_model) #this weight mask will get applied to the network on the next iteration
 	else:
 		expanded_mask = mask
+
+	if no_first_layer_partial_mask:
+		expanded_mask[0] = fill_partial_filters_in_mask(expanded_mask[0].clone())
 
 	for l in expanded_mask:
 		l = l.to(device)

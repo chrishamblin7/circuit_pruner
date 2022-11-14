@@ -186,3 +186,16 @@ def color_channel_kernel_2_image(kernel,save=False):
 	else:
 		image.save(save)
 
+
+def fill_partial_filters_in_mask(mask):
+	#This is useful for the circuit diagrams for first layer masks
+	# it takes the filters with some masked kernels and unmasks them,
+	#in the first layer partial filters like this just mess with color
+	# without really simplifying
+
+	for i in range(mask.shape[0]):
+
+		if mask[i].sum() != 0:
+			mask[i] = torch.ones(mask[i].shape)		
+
+	return mask	
