@@ -69,7 +69,7 @@ def fft_image(shape, sd=None, magic=None, decay_power=1, start_params=None,devic
     #         import torch
     #         spectrum_real_imag_t = (torch.rfft(start_image, 2, normalized=True)).to(device).requires_grad_(True)
 
-    magic = magic or 40.0
+    magic = magic or 4.0
     
 
     def inner():
