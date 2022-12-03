@@ -407,19 +407,16 @@ def get_num_params_for_cum_score(scores,cum_score):
 	This function will return the number of params to keep in the
 	mask to achieve that cumulative score.
 	'''
-	all_scores = []
 
+
+	all_scores = []
 	for l in scores:
 		all_scores.append(scores[l])
-	
 	all_scores = torch.cat(all_scores).flatten()
-	
-
 	sort_scores = torch.sort(all_scores,descending=True).values
 
 	total_cum = all_scores.sum()
 	target_cum = total_cum*cum_score
-
 
 	curr_sum = 0 
 	for i,k in enumerate(sort_scores):
