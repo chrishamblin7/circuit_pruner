@@ -247,6 +247,19 @@ def sum_loss(target):
 def sum_abs_loss(target):
     return torch.sum(torch.abs(target))
 
+# def positional_loss(target,position):
+#     #position should be (batch_i,H,W)
+#     return target[position[0],position[1],position[2]]
 
 
+class positional_loss(nn.Module):
+    '''
+    position should be (H,W)
+    target should be (batch,H,W) (channel already selected)
+    '''
+    def __init__(self, position):
+        super().__init__()
+        self.position = position
 
+    def forward(self,target):
+        return target[:,self.position[0],self.position[1]].mean(dim=0)

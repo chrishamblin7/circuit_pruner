@@ -136,11 +136,12 @@ class simple_data(Dataset):
 
 class rank_image_data(Dataset):
 
-	def __init__(self, root_dir, transform, label_file_path = None, label_dict_path = None, class_folders=False ):
+	def __init__(self, root_dir, transform, label_file_path = None, label_dict_path = None, class_folders=False,return_image_name=False ):
 		
 		
 		self.root_dir = root_dir
 		self.class_folders = class_folders
+		self.return_image_name = return_image_name
 		if not self.class_folders:
 			self.img_names = os.listdir(self.root_dir)
 			self.img_names.sort()
@@ -203,8 +204,10 @@ class rank_image_data(Dataset):
 		img = Image.open(img_path)
 		img = self.transform(img).float()
 		label = self.get_label_from_name(self.img_names[idx])
-		
-		return (img,label)
+		if self.return_image_name:
+			return(img,label,self.img_names[idx])
+		else:
+			return (img,label)
 
 
 def max_likelihood_for_no_target(target,model_output):

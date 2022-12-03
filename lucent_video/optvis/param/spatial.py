@@ -17,6 +17,7 @@ from __future__ import absolute_import, division, print_function
 
 import torch
 import numpy as np
+from lucent_video.optvis.param import color
 
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -29,7 +30,7 @@ def pixel_image(shape, sd=None,start_params=None,magic=None,device=device):
     if start_params is None:
         tensor = (torch.randn(*shape) * sd).to(device).requires_grad_(True)
     else:
-        tensor = start_image.to(device).requires_grad_(True)
+        tensor = start_params.to(device).requires_grad_(True)
     return [tensor], lambda: tensor
 
 
@@ -44,7 +45,6 @@ def rfft2d_freqs(h, w):
     else:
         fx = np.fft.fftfreq(w)[: w // 2 + 1]
     return np.sqrt(fx * fx + fy * fy)
-
 
 def fft_image(shape, sd=None, magic=None, decay_power=1, start_params=None,device=device):
     import torch
@@ -89,3 +89,31 @@ def fft_image(shape, sd=None, magic=None, decay_power=1, start_params=None,devic
         image.retain_grad()
         return image
     return [spectrum_real_imag_t], inner
+
+
+def image_2_fourier(pixel_image, desaturation=4.0):
+  '''
+  pixel image is a torch tensor of shape (batch,channel,h,w),
+  returns a fourier image that can be used as start_params
+  '''
+  import torch
+  TORCH_VERSION = torch.__version__
+  shape = pixel_image.shape
+  batch, channels, h, w = shape
+  freqs = rfft2d_freqs(h, w)
+  init_val_size = (batch, channels) + freqs.shape + (2,) # 2 for imaginary and real components
+  scale = 1.0 / np.maximum(freqs, 1.0 / max(w, h))
+  scale = torch.tensor(scale).float()[None, None, ..., None].to(device)
+  image = torch.tensor(pixel_image)
+  image = torch.logit(image).permute(0, 2, 3, 1)
+  image = torch.matmul(image,torch.inverse(torch.tensor(color.color_correlation_normalized.T).to(image.device)))
+  image = image.permute(0,3,1,2)
+  image = image * desaturation
+  if TORCH_VERSION >= "1.7.0":
+      import torch.fft
+      fourier_image = torch.fft.rfftn(image, norm='ortho',s=(h, w))
+      fourier_image = torch.view_as_real(fourier_image)
+  else:
+      fourier_image = torch.fft.rfftn(image, 2, normalized=True, signal_sizes=(h, w))
+  fourier_image = fourier_image/scale
+  return fourier_image

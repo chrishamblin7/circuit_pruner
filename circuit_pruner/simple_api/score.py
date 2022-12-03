@@ -9,6 +9,8 @@ from typing import Dict, Iterable, Callable
 from collections import OrderedDict
 from circuit_pruner.custom_exceptions import TargetReached
 import types
+from torch import nn, Tensor
+from typing import Dict, Iterable, Callable
 from copy import deepcopy
 from math import log, exp, ceil
 from circuit_pruner.simple_api.target import feature_target_saver,sum_abs_loss
@@ -183,7 +185,6 @@ def force_score(model, dataloader,target_layer_name,unit,keep_ratio=.1, T=10, nu
 	return structured_scores
 
 
-
 def actgrad_kernel_score(model,dataloader,target_layer_name,unit,loss_f = sum_abs_loss):
 
 	_ = model.eval()
@@ -261,6 +262,62 @@ def actgrad_kernel_score(model,dataloader,target_layer_name,unit,loss_f = sum_ab
 	del dis_model #might be redundant
 
 	return scores
+
+
+class actgrad_filter_extractor(nn.Module):
+	def __init__(self, model: nn.Module, layers: Iterable[str],absolute=True):
+		super().__init__()
+		self.model = model
+		self.layers = layers
+		self.activations = {layer: None for layer in layers}
+		self.gradients = {layer: None for layer in layers}
+		self.absolute = absolute
+
+	def __enter__(self, *args):
+		#self.remove_all_hooks() 
+		self.hooks = {'forward':{},
+				 	  'backward':{}}   #saving hooks to variables lets us remove them later if we want
+		for layer_id in self.layers:
+			layer = dict([*self.model.named_modules()])[layer_id]
+			self.hooks['forward'][layer_id] = layer.register_forward_hook(self.save_activations(layer_id)) #execute on forward pass
+			self.hooks['backward'][layer_id] = layer.register_backward_hook(self.save_gradients(layer_id))    #execute on backwards pass      
+		return self
+
+	def __exit__(self, *args): 
+		self.remove_all_hooks()
+
+
+	def save_activations(self, layer_id: str) -> Callable:
+		def fn(module, input, output):  #register_hook expects to recieve a function with arguments like this
+			#output is what is return by the layer with dim (batch_dim x out_dim), sum across the batch dim
+			if self.absolute:
+				batch_summed_output = torch.sum(torch.abs(output),dim=0).detach().cpu()
+			else:
+				batch_summed_output = torch.sum(output,dim=0).detach().cpu()
+			if self.activations[layer_id] is None:
+				self.activations[layer_id] = batch_summed_output
+			else:
+				self.activations[layer_id] +=  batch_summed_output
+		return fn
+	
+	def save_gradients(self, layer_id: str) -> Callable:
+		def fn(module, grad_input, grad_output):
+			if self.absolute:
+				batch_summed_output = torch.sum(torch.abs(grad_output[0]),dim=0).detach().cpu() #grad_output is a tuple with 'device' as second item
+			else:
+				batch_summed_output = torch.sum(grad_output[0],dim=0).detach().cpu()
+
+			if self.gradients[layer_id] is None:
+				self.gradients[layer_id] = batch_summed_output
+			else:
+				self.gradients[layer_id] +=  batch_summed_output 
+		return fn
+	
+	def remove_all_hooks(self):
+		for layer_id in self.layers:
+			self.hooks['forward'][layer_id].remove()
+			self.hooks['backward'][layer_id].remove()
+
 
 
 def magnitude_scores_from_scores(scores,model,target_layer_name,unit,structure='kernels'):
@@ -344,5 +401,31 @@ def minmax_norm_scores(scores, min=0, max=1):
 
 
 
+def get_num_params_for_cum_score(scores,cum_score):
+	'''
+	Given scores, and a target cumulative score (between 0-1)
+	This function will return the number of params to keep in the
+	mask to achieve that cumulative score.
+	'''
+
+    all_scores = []
+
+    for l in scores:
+        all_scores.append(scores[l])
+    
+    all_scores = torch.cat(all_scores).flatten()
+    
+
+    sort_scores = torch.sort(all_scores,descending=True).values
+
+    total_cum = all_scores.sum()
+    target_cum = total_cum*cum_score
 
 
+    curr_sum = 0 
+    for i,k in enumerate(sort_scores):
+        curr_sum+= k
+        if curr_sum >= target_cum:
+            break
+
+    return i

@@ -126,8 +126,12 @@ def expand_structured_mask(mask,model):
 def mask_intersect_over_union(mask1,mask2):
 	iou = {}
 	for layer_name in mask1:
-		intersect_mask = mask1[layer_name]*mask2[layer_name]
-		union_mask = torch.ceil((mask1[layer_name]+mask2[layer_name])/2)
-		iou[layer_name] = (torch.sum(intersect_mask)/torch.sum(union_mask))
+		try:
+			intersect_mask = mask1[layer_name]*mask2[layer_name]
+			union_mask = torch.ceil((mask1[layer_name]+mask2[layer_name])/2)
+			iou[layer_name] = (torch.sum(intersect_mask)/torch.sum(union_mask))
+		except:
+			print('skipping %s'%layer_name)
+			continue
 	return iou
 
