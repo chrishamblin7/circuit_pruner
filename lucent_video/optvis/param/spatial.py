@@ -91,11 +91,12 @@ def fft_image(shape, sd=None, magic=None, decay_power=1, start_params=None,devic
     return [spectrum_real_imag_t], inner
 
 
-def image_2_fourier(pixel_image, desaturation=4.0):
+def image_2_fourier(pixel_image, saturation=4.0):
   '''
   pixel image is a torch tensor of shape (batch,channel,h,w),
   returns a fourier image that can be used as start_params
   '''
+  device = pixel_image.device
   import torch
   TORCH_VERSION = torch.__version__
   shape = pixel_image.shape
@@ -108,7 +109,7 @@ def image_2_fourier(pixel_image, desaturation=4.0):
   image = torch.logit(image).permute(0, 2, 3, 1)
   image = torch.matmul(image,torch.inverse(torch.tensor(color.color_correlation_normalized.T).to(image.device)))
   image = image.permute(0,3,1,2)
-  image = image * desaturation
+  image = image * saturation
   if TORCH_VERSION >= "1.7.0":
       import torch.fft
       fourier_image = torch.fft.rfftn(image, norm='ortho',s=(h, w))

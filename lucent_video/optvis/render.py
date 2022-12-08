@@ -92,6 +92,8 @@ def render_vis(
         print("Initial loss: {:.3f}".format(objective_f(hook)))
 
     images = []
+    losses = []
+    params_list = []
     try:
         for i in tqdm(range(1, max(thresholds) + 1), disable=(not progress)):
             def closure():
@@ -121,6 +123,8 @@ def render_vis(
                     if show_inline:
                         show(image)
                 images.append(image)
+                losses.append(objective_f(hook).detach().cpu())
+                params_list.append(params[0])
     except KeyboardInterrupt:
         print("Interrupted optimization at step {:d}.".format(i))
         if verbose:
@@ -138,8 +142,8 @@ def render_vis(
 
     output = {}
     output['images'] = images
-    output['params'] = params[0]
-    output['loss'] = objective_f(hook)
+    output['params'] = params_list
+    output['loss'] = losses
 
     return output
 
