@@ -203,6 +203,8 @@ class rank_image_data(Dataset):
 		img_path = os.path.join(self.root_dir,self.img_names[idx])
 		img = Image.open(img_path)
 		img = self.transform(img).float()
+		if img.shape[0] == 1: #replicate grayscale image
+			img = img.repeat(3, 1, 1)
 		label = self.get_label_from_name(self.img_names[idx])
 		if self.return_image_name:
 			return(img,label,self.img_names[idx])
