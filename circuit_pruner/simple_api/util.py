@@ -1,4 +1,5 @@
 import torch
+from torch import nn
 from collections import OrderedDict
 from math import ceil
 
@@ -57,3 +58,25 @@ def convert_relu_layers(parent):
             setattr(parent, child_name, nn.ReLU(inplace=False))
         elif len(list(child.children())) > 0:
             convert_relu_layers(child)
+
+
+def inplace_model_edit(model, target_name, new_module):
+  #name should be the module name according to the 'OrderedDict([*model.named_modules()])' method ("." nesting)
+  #useful for doing things like changing a relu to 'inplace'
+
+    # recursive function to get layers
+    def get_layers(module, prefix=[]):
+        if hasattr(module, "_modules"):
+            for name, layer in module._modules.items():
+                if layer is None:
+                    # e.g. GoogLeNet's aux1 and aux2 layers
+                    continue
+                full_name = ".".join(prefix+[name])
+                if full_name == target_name:
+                  layer = new_module
+                  setattr(module, name, new_module)
+                
+                setattr(module, name, layer)
+                get_layers(layer, prefix=prefix+[name])
+
+    get_layers(model)
