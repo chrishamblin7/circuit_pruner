@@ -52,12 +52,26 @@ def get_layer_type(model, layer_name):
     for name,m in list(model.named_modules()):
         if name == layer_name: return m.__class__.__name__
             
-def convert_relu_layers(parent):
-    for child_name, child in parent.named_children():
-        if isinstance(child, nn.ReLU) and child.inplace==True:
-            setattr(parent, child_name, nn.ReLU(inplace=False))
-        elif len(list(child.children())) > 0:
-            convert_relu_layers(child)
+def convert_relu_layers(model):
+  #name should be the module name according to the 'OrderedDict([*model.named_modules()])' method ("." nesting)
+  #useful for doing things like changing a relu to 'inplace'
+
+    # recursive function to get layers
+    def get_layers(module):
+        if hasattr(module, "_modules"):
+            for name, layer in module._modules.items():
+                if layer is None:
+                    # e.g. GoogLeNet's aux1 and aux2 layers
+                    continue
+                if isinstance(layer, nn.ReLU):
+                  layer = nn.ReLU(inplace=False)
+                  setattr(module, name, nn.ReLU(inplace=False))
+                
+                setattr(module, name, layer)
+                get_layers(layer)
+
+    get_layers(model)
+
 
 
 def inplace_model_edit(model, target_name, new_module):
