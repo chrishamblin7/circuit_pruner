@@ -401,7 +401,7 @@ def minmax_norm_scores(scores, min=0, max=1):
 
 
 
-def get_num_params_for_cum_score(scores,cum_score):
+def get_num_params_from_cum_score(scores,cum_score):
 	'''
 	Given scores, and a target cumulative score (between 0-1)
 	This function will return the number of params to keep in the
