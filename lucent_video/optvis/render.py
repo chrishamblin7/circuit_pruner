@@ -87,13 +87,21 @@ def render_vis(
     hook = hook_model(model, image_f)
     objective_f = objectives.as_objective(objective_f)
 
-    if verbose:
-        model(transform_f(image_f()))
-        print("Initial loss: {:.3f}".format(objective_f(hook)))
+    # init_image = tensor_to_img_array(image_f())
+    # init_loss = objective_f(hook)
+
+    # images = [init_image]
+    # losses = [init_loss]
+    # params_list = [params[0]]
 
     images = []
     losses = []
     params_list = []
+
+    if verbose:
+        model(transform_f(image_f()))
+        print("Initial loss: {:.3f}".format(objective_f(hook)))
+
     try:
         for i in tqdm(range(1, max(thresholds) + 1), disable=(not progress)):
             def closure():

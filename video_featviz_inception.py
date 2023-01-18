@@ -42,7 +42,7 @@ def get_args():
 	parser.add_argument('--opt-steps', type=int, default=150, help='how many times to run optimizer for each frame')
 	parser.add_argument('--desaturation', type=float, default=4.0, help='desaturation param')
 	parser.add_argument('--min-sparsity', type=float, default=.001, help='sparsity to start from')
-	parser.add_argument('--max-sparsity', type=float, default=.4, help='sparsity to end at')
+	parser.add_argument('--max-sparsity', type=float, default=.6, help='sparsity to end at')
 
 
 	args = parser.parse_args()
