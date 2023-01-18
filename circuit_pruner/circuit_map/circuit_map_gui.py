@@ -5,6 +5,7 @@ from PIL import Image
 from collections import OrderedDict
 import numpy as np
 import torch
+from torch.utils.data import Dataset, DataLoader
 from torch import nn
 import torchvision
 import pandas as pd
@@ -16,15 +17,18 @@ from circuit_pruner.simple_api.target import sum_abs_loss, positional_loss, feat
 from circuit_pruner.simple_api.mask import setup_net_for_mask, mask_from_scores, apply_mask
 from circuit_pruner.simple_api.util import params_2_target_from_scores
 from circuit_pruner.simple_api.score import actgrad_filter_score, actgrad_kernel_score, get_num_params_from_cum_score, snip_score
-from circuit_pruner.data_loading import single_image_data
+from circuit_pruner.data_loading import single_image_data, default_preprocess
 from lucent_video.optvis import render, param, transform, objectives
 from lucent_video.optvis.render_video import render_accentuation
 from circuit_pruner.simple_api.dissected_Conv2d import dissect_model
+#make relus not inplace, important visualizing negative activations for example
+from circuit_pruner.simple_api.util import convert_relu_layers
+from circuit_pruner.receptive_fields import position_crop_image,receptive_field
 
 #plotting
 import plotly.express as px
 from jupyter_dash import JupyterDash
-from dash import dcc, html, Input, Output, no_update
+from dash import dcc, html, Input, Output, no_update, State, ctx
 import plotly.graph_objects as go
 import io
 import base64
@@ -32,12 +36,12 @@ from sklearn.cluster import KMeans
 from scipy.spatial import distance_matrix
 
 
+default_input_size = (3,224,224)
 
-
-def image_path_to_base64(im_path,pos=None,size = (input_size[1],input_size[2])):
+def image_path_to_base64(im_path,layer,pos=None,size = (default_input_size[1],default_input_size[2]),rf_dict=None):
     img = Image.open(im_path)
     if pos is not None:
-        img = position_crop_image(img,pos,layer_name)
+        img = position_crop_image(img,pos,layer,rf_dict=rf_dict)
     else:
         img = img.resize(size)
     buffer = io.BytesIO()
@@ -47,9 +51,9 @@ def image_path_to_base64(im_path,pos=None,size = (input_size[1],input_size[2])):
     return im_url
 
 
-def pil_image_to_base64(img,pos=None,size = (input_size[1],input_size[2])):
+def pil_image_to_base64(img,layer,pos=None,size = (default_input_size[1],default_input_size[2]),rf_dict=None):
     if pos is not None:
-        img = position_crop_image(img,pos,layer_name)
+        img = position_crop_image(img,pos,layer,rf_dict=rf_dict)
     else:
         img = img.resize(size)
     buffer = io.BytesIO()
@@ -61,7 +65,7 @@ def pil_image_to_base64(img,pos=None,size = (input_size[1],input_size[2])):
 
 
 
-def umap_fig_from_df(df,data_folder=None,normed=False,align_df=None,num_display_images=50,act_column = None,color_std=None,show_colorscale=True):
+def umap_fig_from_df(df,data_folder=None,layer=None,normed=False,align_df=None,num_display_images=50,act_column = None,color_std=None,show_colorscale=True,rf_dict=None):
     '''
     df: a umap df
     data_folder: path to images
@@ -129,10 +133,11 @@ def umap_fig_from_df(df,data_folder=None,normed=False,align_df=None,num_display_
                                 visible='legendonly'))
 
         
-    if show_colorscale:
+    if not show_colorscale:
         fig.update_traces(marker_showscale=False)
     
     layout = go.Layout(   margin = dict(l=5,r=5,b=5,t=5),
+                          legend=dict(yanchor="top", xanchor="left", x=0.0),
                           paper_bgcolor='rgba(255,255,255,1)',
                           plot_bgcolor='rgba(255,255,255,1)',
                           xaxis=dict(showline=False,showgrid=False,showticklabels=False,range=[torch.min(torch.tensor(x))-1, torch.max(torch.tensor(x))+1]),
@@ -165,7 +170,7 @@ def umap_fig_from_df(df,data_folder=None,normed=False,align_df=None,num_display_
             position=None
             if use_position:
                 position = df.iloc[i]['position']  
-            img = image_path_to_base64(data_folder+'/'+df.iloc[i]['image'],pos=position,size = (input_size[1],input_size[2]))
+            img = image_path_to_base64(data_folder+'/'+df.iloc[i]['image'],layer,pos=position,size = (default_input_size[1],default_input_size[2]),rf_dict=rf_dict)
             #img = Image.open(data_folder+'/'+df.iloc[i]['image']) 
             fig.add_layout_image(
                                 dict(
@@ -192,43 +197,57 @@ def umap_fig_from_df(df,data_folder=None,normed=False,align_df=None,num_display_
 
 
 
-def full_app_from_df(df,data_folder,normed=True, align_df = None,max_images=200):
+def full_app_from_df(df,data_folder,model,layer,unit,normed=False, align_df = None,max_images=200,image_order=None,use_kernels=True,preprocess=default_preprocess,input_size=default_input_size):
+    device = next(model.parameters()).device 
+    convert_relu_layers(model)
+
+    rf_dict = receptive_field(model, input_size, print_output=False)
+
     use_position = False
     if 'position' in df.columns:
         use_position = True
+
+    if use_kernels:
+        dis_model = dissect_model(deepcopy(model))  
+        _ = dis_model.eval().to(device)
+        pruning_type_selector = dcc.RadioItems(['filters', 'kernels', 'weights'],'filters',id='pruning_type')
+    else:
+        pruning_type_selector = dcc.RadioItems(['filters', 'weights'],'filters',id='pruning_type')
     
     top_row = df[df['activation'] == df['activation'].max()].iloc[0]
     top_row_pos = None
     if use_position:
         top_row_pos = top_row['position']
-    start_image = image_path_to_base64(data_folder+top_row['image'],pos=top_row_pos)
+    start_image = image_path_to_base64(data_folder+top_row['image'],layer,pos=top_row_pos,rf_dict=rf_dict)
 
-    umap_fig = umap_fig_from_df(df,normed=normed, align_df=align_df)
+    umap_fig = umap_fig_from_df(df,layer=layer,normed=normed, align_df=align_df,rf_dict=rf_dict)
     
     xy_addition = ''
     if normed:
         xy_addition = '_normed'
-    #image order
-    #select images far apart
-    pts2D = np.swapaxes(np.array([list(df['x']),list(df['y'])]),0,1)
-    kmeans = KMeans(n_clusters=max_images, random_state=0).fit(pts2D)
-    labels = kmeans.predict(pts2D)
-    cntr = kmeans.cluster_centers_
-    image_order = []
-    for i, c in enumerate(cntr):
-        lab = np.where(labels == i)[0]
-        pts = pts2D[lab]
-        d = distance_matrix(c[None, ...], pts)
-        idx1 = np.argmin(d, axis=1) + 1
-        idx2 = np.searchsorted(np.cumsum(labels == i), idx1)[0]
-        image_order.append(idx2)
+    
+    if image_order is None:
+        #image order
+        #select images far apart
+        pts2D = np.swapaxes(np.array([list(df['x']),list(df['y'])]),0,1)
+        kmeans = KMeans(n_clusters=max_images, random_state=0).fit(pts2D)
+        labels = kmeans.predict(pts2D)
+        cntr = kmeans.cluster_centers_
+        image_order = []
+        for i, c in enumerate(cntr):
+            lab = np.where(labels == i)[0]
+            pts = pts2D[lab]
+            d = distance_matrix(c[None, ...], pts)
+            idx1 = np.argmin(d, axis=1) + 1
+            idx2 = np.searchsorted(np.cumsum(labels == i), idx1)[0]
+            image_order.append(idx2)
     #all layout images
     all_layout_images = []        
     for i in image_order:
         position=None
         if use_position:
             position = df.iloc[i]['position']  
-        img = image_path_to_base64(data_folder+'/'+df.iloc[i]['image'],pos=position,size = (input_size[1],input_size[2]))
+        img = image_path_to_base64(data_folder+'/'+df.iloc[i]['image'],layer,pos=position,size = (default_input_size[1],default_input_size[2]),rf_dict=rf_dict)
         #img = Image.open(data_folder+'/'+df.iloc[i]['image']) 
         all_layout_images.append(
                                     dict(
@@ -262,14 +281,19 @@ def full_app_from_df(df,data_folder,normed=True, align_df = None,max_images=200)
         #dcc.Graph(id="umap", figure=umap_fig, clear_on_unhover=True,style={'width': '100vh', 'height': '100vh'}),
         dcc.Graph(id="umap", figure=umap_fig, clear_on_unhover=True),
         html.Label('# plot images'),
-        dcc.Slider(0, max_images, 1,
-                  marks={i: str(i) for i in range(0,max_images,10)},
+        dcc.Slider(0, len(image_order), 1,
+                  marks={i: str(i) for i in range(0,len(image_order),10)},
                   value=0,
                   id='num_images_slider'
                  ),
+        html.Label('size plot images'),
+        dcc.Slider(.001, 1, .01,
+                  marks={i/10: str(round(i/10,1)) for i in range(0,10)},
+                  value=.5,
+                  id='size_images_slider'
+                 ),
         dcc.Tooltip(id="graph-tooltip")
                ],style={'width': '49%','display': 'inline-block'}),
-        
       html.Br(),
         
       html.Div([
@@ -283,7 +307,7 @@ def full_app_from_df(df,data_folder,normed=True, align_df = None,max_images=200)
         
       html.Div([
         html.Label('accentuation steps'),
-        dcc.Slider(0, 40, 1,
+        dcc.Slider(0, 39, 1,
                   value=20,
                   marks={i: str(i) for i in range(0,40,5)},
                   id='accent_threshold_slider'
@@ -303,7 +327,7 @@ def full_app_from_df(df,data_folder,normed=True, align_df = None,max_images=200)
                  ),
         html.Br(),
         html.Label('pruning type'),
-        dcc.RadioItems(['filters', 'kernels', 'weights'],'filters',id='pruning_type'),
+        pruning_type_selector,
         html.Div(id='sparsity'),
       ],style={'width': '49%','display': 'inline-block'}),
         
@@ -333,7 +357,7 @@ def full_app_from_df(df,data_folder,normed=True, align_df = None,max_images=200)
             position = df_row['position']
         
         img_path = data_folder+'/'+df_row['image']
-        img_src = image_path_to_base64(img_path,pos=position)
+        img_src = image_path_to_base64(img_path,layer,pos=position,rf_dict=rf_dict)
         act = round(df_row['activation'],3)
         norm = round(df_row['norm'],3)
 
@@ -384,13 +408,13 @@ def full_app_from_df(df,data_folder,normed=True, align_df = None,max_images=200)
                                     shuffle=False
                                     )
             if pruning_type == 'weights':
-                scores = snip_score(model,dataloader,layer_name.replace('_','.'),unit,loss_f=loss)
+                scores = snip_score(model,dataloader,layer.replace('_','.'),unit,loss_f=loss)
             elif pruning_type == 'kernels':
-                scores = actgrad_kernel_score(dis_model,dataloader,layer_name.replace('_','.'),unit,loss_f=loss,dissect_model=False)
+                scores = actgrad_kernel_score(dis_model,dataloader,layer.replace('_','.'),unit,loss_f=loss,dissect_model=False)
             else:
-                scores = actgrad_filter_score(model,dataloader,layer_name.replace('_','.'),unit,loss_f=loss)  
+                scores = actgrad_filter_score(model,dataloader,layer.replace('_','.'),unit,loss_f=loss)  
             keep_params = get_num_params_from_cum_score(scores,cum_score)
-            total_params = params_2_target_from_scores(scores,unit,layer_name,model)
+            total_params = params_2_target_from_scores(scores,unit,layer,model)
             sparsity = keep_params/total_params
             mask = mask_from_scores(scores, num_params_to_keep = keep_params)
             apply_mask(model,mask,zero_absent=False) #dont zero absent as scores dont have target layer
@@ -398,8 +422,8 @@ def full_app_from_df(df,data_folder,normed=True, align_df = None,max_images=200)
 
 
         orig_pil_img = Image.open(img_path)
-        orig_img_src = pil_image_to_base64(orig_pil_img,pos=position)
-        accent_output = render_accentuation(img_path,layer_name,unit,model,saturation=sat*16.,device=device,size=224,show_image=False)
+        orig_img_src = pil_image_to_base64(orig_pil_img,layer,pos=position,rf_dict=rf_dict)
+        accent_output = render_accentuation(img_path,layer.replace('.','_'),unit,model,saturation=sat*16.,device=device,size=input_size[1],show_image=False)
 
         data = {'images':{'orig':orig_img_src,
                         'max':{},
@@ -418,10 +442,10 @@ def full_app_from_df(df,data_folder,normed=True, align_df = None,max_images=200)
             accent_img_min = Image.fromarray(np.uint8(accent_tensor_img_min*255))
             noise_img_max = Image.fromarray(np.uint8(noise_tensor_img_max*255))
             noise_img_min = Image.fromarray(np.uint8(noise_tensor_img_min*255))
-            data['images']['max']['frame %s'%(str(frame))] = pil_image_to_base64(accent_img_max,pos=position)
-            data['images']['min']['frame %s'%(str(frame))] = pil_image_to_base64(accent_img_min,pos=position)
-            data['images']['max_noise']['frame %s'%(str(frame))] = pil_image_to_base64(noise_img_max,pos=position)
-            data['images']['min_noise']['frame %s'%(str(frame))] = pil_image_to_base64(noise_img_min,pos=position)
+            data['images']['max']['frame %s'%(str(frame))] = pil_image_to_base64(accent_img_max,layer,pos=position,rf_dict=rf_dict)
+            data['images']['min']['frame %s'%(str(frame))] = pil_image_to_base64(accent_img_min,layer,pos=position,rf_dict=rf_dict)
+            data['images']['max_noise']['frame %s'%(str(frame))] = pil_image_to_base64(noise_img_max,layer,pos=position,rf_dict=rf_dict)
+            data['images']['min_noise']['frame %s'%(str(frame))] = pil_image_to_base64(noise_img_min,layer,pos=position,rf_dict=rf_dict)
 
         return data
 
@@ -454,9 +478,18 @@ def full_app_from_df(df,data_folder,normed=True, align_df = None,max_images=200)
     @app.callback(
                   Output("umap", "figure"),
                   Input("num_images_slider", "value"),
+                  Input("size_images_slider", "value"),
                   State("umap", "figure"),
                 )
-    def display_fig_images(num_images,fig):
+    def display_fig_images(num_images,size_images,fig):
+        trigger = ctx.triggered_id.split('.')[0]
+        if trigger == 'size_images_slider':
+            fig['layout']['images'] = list(fig['layout']['images'])
+            for i,img in enumerate(fig['layout']['images']):
+                fig['layout']['images'][i]['sizex'] = float(size_images)
+                fig['layout']['images'][i]['sizey'] = float(size_images)
+            fig['layout']['images'] = tuple(fig['layout']['images'])
+            return fig
         try:
             current_images = len(fig['layout']['images'])
         except:

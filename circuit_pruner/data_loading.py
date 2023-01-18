@@ -8,9 +8,29 @@ import torch
 import pickle
 from torch.utils.data import Dataset, DataLoader
 from random import randint
+from torchvision.datasets import ImageFolder
 
 
-def single_image_loader(image_path, transform, label_file_path = None, label_dict_path = None):
+#models except certain image standarization
+default_normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                                     std=[0.229, 0.224, 0.225])
+
+default_unnormalize = transforms.Compose([ transforms.Normalize(mean = [ 0., 0., 0. ],
+                                                     std = [ 1/0.229, 1/0.224, 1/0.225 ]),
+                                transforms.Normalize(mean = [ -0.485, -0.456, -0.406 ],
+                                                     std = [ 1., 1., 1. ]),
+                               ])
+
+
+default_preprocess =  transforms.Compose([
+                                transforms.Resize((224,224)),
+                                transforms.ToTensor(),
+                                default_normalize])
+
+
+
+
+def single_image_loader(image_path, transform=default_preprocess, label_file_path = None, label_dict_path = None, rgb=False):
 	img_name = image_path.split('/')[-1].split('.')[:-1]
 	if not transform:
 		transform = transforms.Compose([transforms.ToTensor()])
@@ -42,6 +62,8 @@ def single_image_loader(image_path, transform, label_file_path = None, label_dic
 
 	#get image	
 	image = Image.open(image_path)
+	if rgb:
+		image = image.convert("RGB")
 	image = transform(image).float()
 	image = image.unsqueeze(0)
 
@@ -50,12 +72,12 @@ def single_image_loader(image_path, transform, label_file_path = None, label_dic
 
 class single_image_data(Dataset):
 	''' a bit silly, but a dataloader class for loading a single image'''
-	def __init__(self, file_path, transform, label_file_path = None, label_dict_path = None):
+	def __init__(self, file_path, transform=default_preprocess, label_file_path = None, label_dict_path = None, rgb=False):
 		
 		
 		self.file_path = file_path
 		self.img_name = file_path.split('/')[-1]
-
+		self.rgb= rgb
 		self.label_list = None
 		self.label_file_path = label_file_path
 		if self.label_file_path is not None:
@@ -103,6 +125,8 @@ class single_image_data(Dataset):
 	def __getitem__(self, idx):
 
 		img = Image.open(self.file_path)
+		if self.rgb:
+			img = img.convert("RGB")
 		img = self.transform(img).float()
 		label = self.get_label_from_name(self.img_name)
 		
@@ -136,7 +160,7 @@ class simple_data(Dataset):
 
 class rank_image_data(Dataset):
 
-	def __init__(self, root_dir, transform, label_file_path = None, label_dict_path = None, class_folders=False,return_image_name=False ):
+	def __init__(self, root_dir, transform=default_preprocess, label_file_path = None, label_dict_path = None, class_folders=False,return_image_name=False,rgb=False ):
 		
 		
 		self.root_dir = root_dir
@@ -170,6 +194,8 @@ class rank_image_data(Dataset):
 			transform = transforms.Compose([transforms.ToTensor()])
 		self.transform = transform
 
+		self.rgb = rgb
+
 	def __len__(self):
 		return len(self.img_names)
 
@@ -202,6 +228,8 @@ class rank_image_data(Dataset):
 
 		img_path = os.path.join(self.root_dir,self.img_names[idx])
 		img = Image.open(img_path)
+		if self.rgb:
+			img = img.convert("RGB")
 		img = self.transform(img).float()
 		if img.shape[0] == 1: #replicate grayscale image
 			img = img.repeat(3, 1, 1)

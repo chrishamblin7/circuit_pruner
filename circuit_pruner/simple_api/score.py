@@ -13,7 +13,7 @@ from torch import nn, Tensor
 from typing import Dict, Iterable, Callable
 from copy import deepcopy
 from math import log, exp, ceil
-from circuit_pruner.simple_api.target import feature_target_saver,sum_abs_loss
+from circuit_pruner.simple_api.target import feature_target_saver,sum_abs_loss, positional_loss
 from circuit_pruner.simple_api.mask import mask_from_scores, setup_net_for_mask, apply_mask
 from circuit_pruner.simple_api.util import params_2_target_from_scores
 from circuit_pruner.simple_api.dissected_Conv2d import *
@@ -185,15 +185,18 @@ def force_score(model, dataloader,target_layer_name,unit,keep_ratio=.1, T=10, nu
 	return structured_scores
 
 
-def actgrad_kernel_score(model,dataloader,target_layer_name,unit,loss_f = sum_abs_loss):
+def actgrad_kernel_score(model,dataloader,target_layer_name,unit,loss_f = sum_abs_loss,dissect_model=True):
 
 	_ = model.eval()
 	device = next(model.parameters()).device 
 
-	dis_model = dissect_model(deepcopy(model))
+	if dissect_model:
+		dis_model = dissect_model(deepcopy(model))
+		model.to('cpu') #we need as much memory as we can get
+	else:
+		dis_model = model
 	_ = dis_model.to(device).eval()
 
-	model.to('cpu') #we need as much memory as we can get
 
 	all_layers = OrderedDict([*dis_model.named_modules()])
 	dissected_layers = OrderedDict()
@@ -259,10 +262,12 @@ def actgrad_kernel_score(model,dataloader,target_layer_name,unit,loss_f = sum_ab
 
 	for layer_name, layer in dissected_layers.items():
 		layer.kernel_scores = None
-	del dis_model #might be redundant
+
+	if dissect_model:
+		del dis_model #might be redundant
+		model.to(device)
 
 	return scores
-
 
 class actgrad_filter_extractor(nn.Module):
 	def __init__(self, model: nn.Module, layers: Iterable[str],absolute=True):
@@ -317,6 +322,85 @@ class actgrad_filter_extractor(nn.Module):
 		for layer_id in self.layers:
 			self.hooks['forward'][layer_id].remove()
 			self.hooks['backward'][layer_id].remove()
+
+
+def actgrad_filter_score(model,dataloader,target_layer_name,unit,loss_f=sum_abs_loss,absolute=True,return_target=False,relu=True,score_type = 'actgrad'):
+    all_layers = OrderedDict([*model.named_modules()])
+    scoring_layers = []
+    for layer in all_layers:
+        if layer == target_layer_name:   #HACK MIGHT NOT WORK WITH INCEPTION
+            break
+        if isinstance(all_layers[layer],torch.nn.modules.conv.Conv2d):
+            scoring_layers.append(layer)
+            
+    _ = model.eval()
+    device = next(model.parameters()).device 
+    
+    scores = OrderedDict()
+    
+    
+    overall_loss = 0
+    with feature_target_saver(model,target_layer_name,unit) as target_saver:
+        with actgrad_filter_extractor(model,scoring_layers,absolute = absolute) as score_saver:
+            for i, data in enumerate(dataloader, 0):
+                inputs, label = data
+                inputs = inputs.to(device)
+
+                model.zero_grad() #very import!
+                target_activations = target_saver(inputs)
+
+                #feature collapse
+                loss = loss_f(target_activations)
+                overall_loss+=loss
+                loss.backward()
+
+            #get average by dividing result by length of dset
+            activations = score_saver.activations
+            gradients = score_saver.gradients
+
+            for l in scoring_layers:
+                
+                if score_type == 'gradients':
+                    layer_scores = gradients[l]
+                elif score_type == 'activations':
+                    #get mask where gradient zero (outside receptive field)
+                    grad_mask = (gradients[l] != 0.).float()
+                    if relu:
+                        rl=nn.ReLU()
+                        layer_scores = (rl(activations[l]) * grad_mask).mean(dim=(1,2))
+                    else:
+                        layer_scores = (activations[l] * grad_mask).mean(dim=(1,2))
+                        
+                else:   
+                    if relu:
+                        rl=nn.ReLU()
+                        layer_scores = (rl(activations[l]) * gradients[l]).mean(dim=(1,2))
+                    else:
+                        layer_scores = (activations[l] * gradients[l]).mean(dim=(1,2))
+                    
+                    
+                if l not in scores.keys():
+                    scores[l] = layer_scores
+                else:
+                    scores[l] += layer_scores
+
+
+    remove_keys = []
+    for layer in scores:
+        if torch.sum(scores[layer]) == 0.:
+            remove_keys.append(layer)
+    if len(remove_keys) > 0: 
+        print('removing layers from scores with scores all 0:')
+        for k in remove_keys:
+            print(k)
+            del scores[k]
+
+
+    model.zero_grad() 
+    if return_target:
+        return scores,float(overall_loss.detach().cpu())
+    else:
+        return scores
 
 
 
@@ -401,27 +485,38 @@ def minmax_norm_scores(scores, min=0, max=1):
 
 
 
-def get_num_params_from_cum_score(scores,cum_score):
+def get_num_params_from_cum_score(scores,cum_score,tolerance=.005):
 	'''
 	Given scores, and a target cumulative score (between 0-1)
 	This function will return the number of params to keep in the
-	mask to achieve that cumulative score.
+	mask to achieve that cumulative score, and the sparsity level 
+	at that cumulative score
 	'''
 
 
 	all_scores = []
 	for l in scores:
-		all_scores.append(scores[l])
+		all_scores.append(scores[l].flatten())
 	all_scores = torch.cat(all_scores).flatten()
 	sort_scores = torch.sort(all_scores,descending=True).values
+	total_sum = all_scores.sum()
+	target_sum = total_sum*cum_score
+	tolerance = .001
+	l_bound = target_sum-target_sum*tolerance
+	u_bound = target_sum+target_sum*tolerance
 
-	total_cum = all_scores.sum()
-	target_cum = total_cum*cum_score
-
-	curr_sum = 0 
-	for i,k in enumerate(sort_scores):
-		curr_sum+= k
-		if curr_sum >= target_cum:
-			break
+	#binary search
+	li=0
+	ui=len(sort_scores)
+	i = int(len(sort_scores)/2)
+	current_sum = sort_scores[0:i].sum()
+	while not l_bound<=current_sum<=u_bound:
+		if current_sum<l_bound:
+			li = i
+			i = li+int((ui-li)/2)
+		else:
+			ui = i
+			i = ui - int((ui-li)/2)
+		current_sum = sort_scores[0:i].sum()
 
 	return i

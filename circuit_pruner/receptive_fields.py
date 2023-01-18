@@ -13,7 +13,7 @@ def check_same(stride):
 		stride = stride[0]
 	return stride
 
-def receptive_field(model, input_size, batch_size=-1, device="cuda"):
+def receptive_field(model, input_size, batch_size=-1, device="cuda",print_output=True):
 	'''
 	:parameter
 	'input_size': tuple of (Channel, Height, Width)
@@ -25,6 +25,13 @@ def receptive_field(model, input_size, batch_size=-1, device="cuda"):
 	'start' denotes the center of the receptive field for the first unit (start) in on direction of the feature tensor.
 		Convention is to use half a pixel as the center for a range. center for `slice(0,5)` is 2.5.
 	'''
+
+	#added by Chris
+	try:
+		model = model.features
+	except:
+		pass
+
 	def register_hook(module):
 
 		def hook(module, input, output):
@@ -123,28 +130,29 @@ def receptive_field(model, input_size, batch_size=-1, device="cuda"):
 	for h in hooks:
 		h.remove()
 
-	print("------------------------------------------------------------------------------")
-	line_new = "{:>20}  {:>10} {:>10} {:>10} {:>15} ".format("Layer (type)", "map size", "start", "jump", "receptive_field")
-	print(line_new)
-	print("==============================================================================")
-	total_params = 0
-	total_output = 0
-	trainable_params = 0
-	for layer in receptive_field:
-		# input_shape, output_shape, trainable, nb_params
-		assert "start" in receptive_field[layer], layer
-		assert len(receptive_field[layer]["output_shape"]) == 4
-		line_new = "{:7} {:12}  {:>10} {:>10} {:>10} {:>15} ".format(
-			"",
-			layer,
-			str(receptive_field[layer]["output_shape"][2:]),
-			str(receptive_field[layer]["start"]),
-			str(receptive_field[layer]["j"]),
-			format(str(receptive_field[layer]["r"]))
-		)
+	if print_output:
+		print("------------------------------------------------------------------------------")
+		line_new = "{:>20}  {:>10} {:>10} {:>10} {:>15} ".format("Layer (type)", "map size", "start", "jump", "receptive_field")
 		print(line_new)
+		print("==============================================================================")
+		total_params = 0
+		total_output = 0
+		trainable_params = 0
+		for layer in receptive_field:
+			# input_shape, output_shape, trainable, nb_params
+			assert "start" in receptive_field[layer], layer
+			assert len(receptive_field[layer]["output_shape"]) == 4
+			line_new = "{:7} {:12}  {:>10} {:>10} {:>10} {:>15} ".format(
+				"",
+				layer,
+				str(receptive_field[layer]["output_shape"][2:]),
+				str(receptive_field[layer]["start"]),
+				str(receptive_field[layer]["j"]),
+				format(str(receptive_field[layer]["r"]))
+			)
+			print(line_new)
 
-	print("==============================================================================")
+		print("==============================================================================")
 	# add input_shape
 	receptive_field["input_size"] = input_size
 	return receptive_field
@@ -165,7 +173,7 @@ def receptive_field_for_unit(receptive_field_dict, layer, unit_position):
 	Out: [(62.0, 161.0), (62.0, 161.0)]
 	"""
 	if ('feature' not in list(receptive_field_dict.keys())[0]) and ('feature' in layer):
-		layer = str(int(layer.split('_')[-1])+1) #hack
+		layer = str(int(layer.split('_')[-1].split('.')[-1])+1) #hack
 	input_shape = receptive_field_dict["input_size"]
 	if layer in receptive_field_dict:
 		rf_stats = receptive_field_dict[layer]
@@ -254,9 +262,30 @@ def recep_field_crop(image,model,layer,target_position,rf_dict = None):
 	"""
 	if rf_dict is None:
 		input_size = tuple(image.shape)
-		rf_dict = receptive_field(model.features, input_size)
+		rf_dict = receptive_field(model, input_size)
 	
 	pos = receptive_field_for_unit(rf_dict, layer, target_position)
 	return image[:,int(pos[0][0]):int(pos[0][1]),int(pos[1][0]):int(pos[1][1])]
+
+def position_crop_image(image,position,layer_name,model=None,input_size=(3,224,244),rf_dict=None):
+	'''
+	crops a PIL image at the receptive field for an individual unit
+	'''
+
+	if rf_dict is None:
+		#dont use nested model, for example in Alexnet pass model.features as 'model'
+		rf_dict = receptive_field(model, input_size,print_output=False)
+	load_image =   transforms.Compose([
+									transforms.Resize((input_size[1],input_size[2])),
+									transforms.ToTensor()])
+	topil = transforms.ToPILImage()
+
+	tensor_image = load_image(image)
+
+	cropped_tensor_image = recep_field_crop(tensor_image,model,layer_name,position,rf_dict = rf_dict) #function from circuit_pruner.receptive_fields
+	img = topil(cropped_tensor_image)
+
+	return img
+
 	
 
