@@ -21,7 +21,6 @@ import torch.nn.functional as F
 from decorator import decorator
 from lucent_video.optvis.objectives_util import _make_arg_str, _extract_act_pos, _T_handle_batch
 
-
 class Objective():
 
     def __init__(self, objective_func, name="", description=""):
@@ -191,6 +190,32 @@ def direction(layer, direction, batch=None):
     def inner(model):
         return -torch.nn.CosineSimilarity(dim=1)(direction.reshape(
             (1, -1, 1, 1)), model(layer)).mean()
+
+    return inner
+
+@wrap_objective()
+def dotdirection(layer, direction, batch=None):
+    """Visualize a direction
+
+    InceptionV1 example:
+    > direction = torch.rand(512, device=device)
+    > obj = objectives.direction(layer='mixed4c', direction=direction)
+
+    Args:
+        layer: Name of layer in model (string)
+        direction: Direction to visualize. torch.Tensor of shape (num_channels,)
+        batch: Batch number (int)
+
+    Returns:
+        Objective
+
+    """
+
+    @handle_batch(batch)
+    def inner(model):
+        return -torch.tensordot(model(layer), 
+                                F.normalize(torch.tensor(direction.float()),
+                                dim=0), dims=([1],[0])).mean()
 
     return inner
 

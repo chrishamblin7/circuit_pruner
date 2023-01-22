@@ -11,6 +11,7 @@ import torchvision
 import pandas as pd
 import pickle
 from copy import deepcopy
+from math import ceil,floor
 
 #library specific packages
 from circuit_pruner.simple_api.target import sum_abs_loss, positional_loss, feature_target_saver
@@ -38,12 +39,57 @@ from scipy.spatial import distance_matrix
 
 default_input_size = (3,224,224)
 
-def image_path_to_base64(im_path,layer,pos=None,size = (default_input_size[1],default_input_size[2]),rf_dict=None):
+
+def color_string_to_list(color_string):
+    color_string = color_string[:-1] #ignore ')'
+    color_string = color_string.split('(')[-1]
+    color_string_list = color_string.split(',')
+    color_list = []
+    for i in color_string_list:
+        color_list.append(int(i))
+    return color_list
+
+def value_to_color_from_cscale(c,cscale,cmin,cmax):
+    #interpolate colors 
+    #transform act between 0-1
+    norm_a = 1/(cmax-cmin)*c-cmin/(cmax-cmin) #minmax norm
+    norm_a = 10*(max(min(norm_a,1.),0.)) #threshold
+    #get_bounds
+    l_bound = int(floor(norm_a))
+    u_bound = int(ceil(norm_a))
+    l_bound_col = color_string_to_list(cscale[l_bound][1])
+    u_bound_col = color_string_to_list(cscale[u_bound][1])
+    #interpolate
+    d = norm_a-floor(norm_a)
+    color = []
+    for i in range(3):
+        color.append(int(l_bound_col[i]+d*(u_bound_col[i]-l_bound_col[i])))
+
+    return color
+
+def add_border_to_PIL_image(img,c,cscale,cmin,cmax,ratio=10):
+    size = img.size
+    color = value_to_color_from_cscale(c,cscale,cmin,cmax)
+    new_size = (size[0]+int(size[0]/ratio), size[1]+int(size[1]/ratio))
+    new_img = Image.new("RGB", new_size, color = tuple(color))   ## luckily, this is already black!
+    box = tuple((n - o) // 2 for n, o in zip(new_size, size))
+    new_img.paste(img, box)
+    return new_img
+
+
+def image_path_to_base64(im_path,layer,pos=None,size = (default_input_size[1],default_input_size[2]),rf_dict=None,boundary_data=None):
     img = Image.open(im_path)
     if pos is not None:
         img = position_crop_image(img,pos,layer,rf_dict=rf_dict)
     else:
         img = img.resize(size)
+    if boundary_data is not None:
+        img = add_border_to_PIL_image(img,
+                                    boundary_data['c'],
+                                    boundary_data['cscale'],
+                                    boundary_data['cmin'],
+                                    boundary_data['cmax'])
+        
     buffer = io.BytesIO()
     img.save(buffer, format="jpeg")
     encoded_image = base64.b64encode(buffer.getvalue()).decode()
@@ -51,11 +97,17 @@ def image_path_to_base64(im_path,layer,pos=None,size = (default_input_size[1],de
     return im_url
 
 
-def pil_image_to_base64(img,layer,pos=None,size = (default_input_size[1],default_input_size[2]),rf_dict=None):
+def pil_image_to_base64(img,layer,pos=None,size = (default_input_size[1],default_input_size[2]),rf_dict=None,boundary_data=None):
     if pos is not None:
         img = position_crop_image(img,pos,layer,rf_dict=rf_dict)
     else:
         img = img.resize(size)
+    if boundary_data is not None:
+        img = add_border_to_PIL_image(img,
+                                    boundary_data['c'],
+                                    boundary_data['cscale'],
+                                    boundary_data['cmin'],
+                                    boundary_data['cmax'])
     buffer = io.BytesIO()
     img.save(buffer, format="jpeg")
     encoded_image = base64.b64encode(buffer.getvalue()).decode()
@@ -65,7 +117,7 @@ def pil_image_to_base64(img,layer,pos=None,size = (default_input_size[1],default
 
 
 
-def umap_fig_from_df(df,data_folder=None,layer=None,normed=False,align_df=None,num_display_images=50,act_column = None,color_std=None,show_colorscale=True,rf_dict=None):
+def umap_fig_from_df(df,data_folder=None,layer=None,normed=False,align_df=None,num_display_images=50,act_column = None,color_std=None,show_colorscale=True,rf_dict=None,image_boundary=True):
     '''
     df: a umap df
     data_folder: path to images
@@ -136,7 +188,7 @@ def umap_fig_from_df(df,data_folder=None,layer=None,normed=False,align_df=None,n
     if not show_colorscale:
         fig.update_traces(marker_showscale=False)
     
-    layout = go.Layout(   margin = dict(l=5,r=5,b=5,t=5),
+    layout = go.Layout(   margin = dict(l=10,r=10,b=10,t=10),
                           legend=dict(yanchor="top", xanchor="left", x=0.0),
                           paper_bgcolor='rgba(255,255,255,1)',
                           plot_bgcolor='rgba(255,255,255,1)',
@@ -167,10 +219,19 @@ def umap_fig_from_df(df,data_folder=None,layer=None,normed=False,align_df=None,n
         if 'position' in df.columns:
             use_position = True
         for i in approx:
+            boundary_data=None
+            if image_boundary:
+                boundary_data = {'c':acts[i],
+                                 'cscale':fig.data[0]['marker']['colorscale'],
+                                 'cmin':-color_limit,
+                                 'cmax':color_limit}
             position=None
             if use_position:
                 position = df.iloc[i]['position']  
-            img = image_path_to_base64(data_folder+'/'+df.iloc[i]['image'],layer,pos=position,size = (default_input_size[1],default_input_size[2]),rf_dict=rf_dict)
+            img = image_path_to_base64(data_folder+'/'+df.iloc[i]['image'],
+                                       layer,pos=position,
+                                       size = (default_input_size[1],default_input_size[2]),
+                                       rf_dict=rf_dict,boundary_data=boundary_data)
             #img = Image.open(data_folder+'/'+df.iloc[i]['image']) 
             fig.add_layout_image(
                                 dict(
@@ -197,7 +258,7 @@ def umap_fig_from_df(df,data_folder=None,layer=None,normed=False,align_df=None,n
 
 
 
-def full_app_from_df(df,data_folder,model,layer,unit,normed=False, align_df = None,max_images=200,image_order=None,use_kernels=True,preprocess=default_preprocess,input_size=default_input_size):
+def full_app_from_df(df,data_folder,model,layer,unit,normed=False, align_df = None,max_images=200,image_order=None,use_kernels=True,preprocess=default_preprocess,input_size=default_input_size,image_boundary=True):
     device = next(model.parameters()).device 
     convert_relu_layers(model)
 
@@ -245,9 +306,18 @@ def full_app_from_df(df,data_folder,model,layer,unit,normed=False, align_df = No
     all_layout_images = []        
     for i in image_order:
         position=None
+        boundary_data=None
+        if image_boundary:
+            boundary_data = {'c':float(df.iloc[i]['activation']),
+                             'cscale':umap_fig.data[0]['marker']['colorscale'],
+                             'cmin':umap_fig.data[0]['marker']['cmin'],
+                             'cmax':umap_fig.data[0]['marker']['cmax']}
         if use_position:
             position = df.iloc[i]['position']  
-        img = image_path_to_base64(data_folder+'/'+df.iloc[i]['image'],layer,pos=position,size = (default_input_size[1],default_input_size[2]),rf_dict=rf_dict)
+        img = image_path_to_base64(data_folder+'/'+df.iloc[i]['image'],
+                                    layer,pos=position,
+                                    size = (default_input_size[1],default_input_size[2]),
+                                    rf_dict=rf_dict,boundary_data=boundary_data)
         #img = Image.open(data_folder+'/'+df.iloc[i]['image']) 
         all_layout_images.append(
                                     dict(
@@ -282,7 +352,7 @@ def full_app_from_df(df,data_folder,model,layer,unit,normed=False, align_df = No
         dcc.Graph(id="umap", figure=umap_fig, clear_on_unhover=True),
         html.Label('# plot images'),
         dcc.Slider(0, len(image_order), 1,
-                  marks={i: str(i) for i in range(0,len(image_order),10)},
+                  marks={i: str(i) for i in range(0,len(image_order),int(len(image_order)/10))},
                   value=0,
                   id='num_images_slider'
                  ),
@@ -422,7 +492,13 @@ def full_app_from_df(df,data_folder,model,layer,unit,normed=False, align_df = No
 
 
         orig_pil_img = Image.open(img_path)
-        orig_img_src = pil_image_to_base64(orig_pil_img,layer,pos=position,rf_dict=rf_dict)
+        boundary_data=None
+        if image_boundary:
+            boundary_data = {'c':float(df_row['activation']),
+                             'cscale':umap_fig.data[0]['marker']['colorscale'],
+                             'cmin':umap_fig.data[0]['marker']['cmin'],
+                             'cmax':umap_fig.data[0]['marker']['cmax']}
+        orig_img_src = pil_image_to_base64(orig_pil_img,layer,pos=position,rf_dict=rf_dict,boundary_data=boundary_data)
         accent_output = render_accentuation(img_path,layer.replace('.','_'),unit,model,saturation=sat*16.,device=device,size=input_size[1],show_image=False)
 
         data = {'images':{'orig':orig_img_src,
