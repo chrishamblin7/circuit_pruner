@@ -235,8 +235,6 @@ class layer_saver(nn.Module):
     
 
 
-
-    
 def layer_activations_from_dataloader(layers,dataloader,model):
   '''
   dataloader: can be a pytorch dataloader or simply a path to an folder with images and no subfolders
@@ -250,7 +248,7 @@ def layer_activations_from_dataloader(layers,dataloader,model):
   if isinstance(dataloader,str):
     batch_size = 64
     kwargs = {'num_workers': 4, 'pin_memory': True, 'sampler':None} if 'cuda' in device.type else {}
-    dataloader = DataLoader(rank_image_data(data_folder,
+    dataloader = DataLoader(rank_image_data(dataloader,
                                             class_folders=False,
                                             rgb=True),
                                             batch_size=batch_size,
