@@ -8,6 +8,8 @@ from torch import Tensor
 from typing import Dict, Iterable, Callable
 from collections import OrderedDict
 from circuit_pruner.custom_exceptions import TargetReached
+from circuit_pruner.data_loading import rank_image_data
+from torch.utils.data import DataLoader
 import types
 from copy import deepcopy
 
@@ -82,7 +84,7 @@ class multi_feature_target_saver(nn.Module):
         with multi_feature_target_saver(model, layer_name) as target_saver:
             ... run images through model
     '''
-    def __init__(self, model, targets, kill_forward = True, device=None):
+    def __init__(self, model, targets, kill_forward = True):
         super().__init__()
         self.model = model
         self.targets = targets
@@ -92,7 +94,7 @@ class multi_feature_target_saver(nn.Module):
         self.hooks = {}
         self.hooks_called = {}  #works in conjunction with kill_forward
         self.kill_forward = kill_forward
-        self.device = device
+        self.device = next(model.parameters()).device  
 
 
     def hook_layers(self):        
@@ -174,14 +176,14 @@ class layer_saver(nn.Module):
         which we've setup to remove the hooks. This will save you 
         headaches during debugging/development.
     '''    
-    def __init__(self, model, layers, retain=True, detach=True, clone=True, device='cpu'):
+    def __init__(self, model, layers, retain=True, detach=True, clone=True):
         super().__init__()
         layers = [layers] if isinstance(layers, str) else layers
         self.model = model
         self.layers = layers
         self.detach = detach
         self.clone = clone
-        self.device = device
+        self.device = next(model.parameters()).device 
         self.retain = retain
         self._features = {layer: torch.empty(0) for layer in layers}        
         self.hooks = {}
@@ -231,6 +233,53 @@ class layer_saver(nn.Module):
         _ = self.model(x)
         return self._features
     
+
+
+
+    
+def layer_activations_from_dataloader(layers,dataloader,model):
+  '''
+  dataloader: can be a pytorch dataloader or simply a path to an folder with images and no subfolders
+  layers: should be a single layer name or list of layer names, for keys in dict "layers = OrderedDict([*model.named_modules()])"
+  model: a pytorch nn model, set the device of model to determine devices for all variables in this function
+  '''
+
+  device = next(model.parameters()).device
+
+  #generate dataloader if image_path passed
+  if isinstance(dataloader,str):
+    batch_size = 64
+    kwargs = {'num_workers': 4, 'pin_memory': True, 'sampler':None} if 'cuda' in device.type else {}
+    dataloader = DataLoader(rank_image_data(data_folder,
+                                            class_folders=False,
+                                            rgb=True),
+                                            batch_size=batch_size,
+                                            shuffle=False,
+                                            **kwargs)
+  
+
+  layer_activations = {}
+  if isinstance(layers,str):
+    layers = [layers]
+  for i in layers:
+    layer_activations[i] = []
+  
+
+  for i, data in enumerate(dataloader):
+    if i%4 == 0:
+      print(str(i)+'/'+str(len(dataloader)))
+    images = data[0].to(device)
+    with layer_saver(model, layer_name) as extractor:
+      batch_layer_activations = extractor(images) #all features for layer and all images in batch
+      for i in layers:
+        layer_activations[i].append(batch_layer_activations[i])
+
+  for i in layers:     
+    layer_activations[i] = torch.cat(layer_activations[i])
+
+  return layer_activations
+    
+
 
 
 
