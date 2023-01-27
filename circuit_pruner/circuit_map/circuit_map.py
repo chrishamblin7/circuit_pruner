@@ -139,3 +139,70 @@ def gen_image_trajectory_map_df(data_folder,model,target_layer,unit,
     umap_df = pd.DataFrame(big_list,columns=columns)
 
     return umap_df, scores
+
+
+
+####SPATIAL
+#rotation for mds plots
+from scipy.spatial.distance import cdist
+
+def cart2pol(x, y):
+    rho = np.sqrt(x**2 + y**2)
+    phi = np.arctan2(y, x)
+    return(rho, phi)
+
+def pol2cart(rho, phi):
+    x = rho * np.cos(phi)
+    y = rho * np.sin(phi)
+    return(x, y)
+
+def rotate_cartesian(vec2d,r):    #rotates 2d cartesian coordinates by some radians 
+    x,y = vec2d[0], vec2d[1]
+    x_out = np.sqrt(x**2+y**2)*np.cos(np.arctan2(y,x)+r)
+    y_out = np.sqrt(x**2+y**2)*np.sin(np.arctan2(y,x)+r)
+    return np.array([x_out,y_out])
+
+
+def align_maps(in_map,anchor_map,angles_tested=64):
+	#centroid align to origin
+	in_map[0] = in_map[0]-in_map[0].mean()
+	in_map[1] = in_map[1]-in_map[1].mean()
+	flipped_in_map = deepcopy(in_map)
+	flipped_in_map[0] = - flipped_in_map[0]
+	anchor_map[0] = anchor_map[0]-anchor_map[0].mean()
+	anchor_map[1] = anchor_map[1]-anchor_map[1].mean()
+	
+	#rotate align
+	flip=False
+	min_dist = 1e40
+	min_discrete_angle = 0
+	for p in range(angles_tested):
+		#unflipped
+		test_map = rotate_cartesian(in_map,p*2*np.pi/angles_tested)
+		dist = sum(np.diagonal(cdist(np.swapaxes(test_map,0,1),np.swapaxes(anchor_map,0,1))))
+		if dist < min_dist:
+			flip=False
+			min_discrete_angle = p
+			min_dist = dist
+		#flipped
+		test_map = rotate_cartesian(flipped_in_map,p*2*np.pi/angles_tested)
+		dist = sum(np.diagonal(cdist(np.swapaxes(test_map,0,1),np.swapaxes(anchor_map,0,1))))
+		if dist < min_dist:
+			flip=True
+			min_discrete_angle = p
+			min_dist = dist
+	if not flip:	
+		return rotate_cartesian(in_map,min_discrete_angle*2*np.pi/angles_tested)
+	else:
+		return rotate_cartesian(flipped_in_map,min_discrete_angle*2*np.pi/angles_tested)
+		
+
+def align_dataframes(in_df,anchor_df,angles_tested=64):
+    
+    in_map = np.array([list(in_df['x']),list(in_df['y'])])
+    anchor_map = np.array([list(anchor_df['x']),list(anchor_df['y'])])
+    
+    aligned_map = align_maps(in_map,anchor_map,angles_tested=angles_tested)
+    in_df['x'],in_df['y'] = aligned_map[0],aligned_map[1]
+    
+    return in_df
