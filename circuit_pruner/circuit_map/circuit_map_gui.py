@@ -117,7 +117,7 @@ def pil_image_to_base64(img,layer,pos=None,size = (default_input_size[1],default
 
 
 
-def umap_fig_from_df(df,data_folder=None,layer=None,normed=False,align_df=None,num_display_images=50,act_column = None,color_std=None,show_colorscale=True,rf_dict=None,image_boundary=True):
+def umap_fig_from_df(df,data_folder=None,layer=None,normed=False,norm_column = 'l1_norm',align_df=None,num_display_images=50,act_column = None,color_std=None,show_colorscale=True,rf_dict=None,image_boundary=True):
     '''
     df: a umap df
     data_folder: path to images
@@ -131,7 +131,7 @@ def umap_fig_from_df(df,data_folder=None,layer=None,normed=False,align_df=None,n
     x = list(df['x'+xy_addition])
     y = list(df['y'+xy_addition])
     #norms
-    norms = list(df['norm'])
+    norms = list(df[norm_column])
     #activations
     act_column = act_column or 'activation'
     acts = list(df[act_column]) 
@@ -258,7 +258,7 @@ def umap_fig_from_df(df,data_folder=None,layer=None,normed=False,align_df=None,n
 
 
 
-def full_app_from_df(df,data_folder,model,layer,unit,normed=False, align_df = None,max_images=200,image_order=None,use_kernels=True,preprocess=default_preprocess,input_size=default_input_size,image_boundary=True):
+def full_app_from_df(df,data_folder,model,layer,unit,normed=False,norm_column='l1_norm', align_df = None,max_images=200,image_order=None,use_kernels=True,preprocess=default_preprocess,input_size=default_input_size,image_boundary=True):
     device = next(model.parameters()).device 
     convert_relu_layers(model)
 
@@ -281,7 +281,7 @@ def full_app_from_df(df,data_folder,model,layer,unit,normed=False, align_df = No
         top_row_pos = top_row['position']
     start_image = image_path_to_base64(data_folder+top_row['image'],layer,pos=top_row_pos,rf_dict=rf_dict)
 
-    umap_fig = umap_fig_from_df(df,layer=layer,normed=normed, align_df=align_df,rf_dict=rf_dict)
+    umap_fig = umap_fig_from_df(df,layer=layer,normed=normed, align_df=align_df,rf_dict=rf_dict,norm_column=norm_column)
     
     xy_addition = ''
     if normed:
