@@ -235,7 +235,7 @@ class layer_saver(nn.Module):
     
 
 
-def layer_activations_from_dataloader(layers,dataloader,model):
+def layer_activations_from_dataloader(layers,dataloader,model,batch_size=64):
   '''
   dataloader: can be a pytorch dataloader or simply a path to an folder with images and no subfolders
   layers: should be a single layer name or list of layer names, for keys in dict "layers = OrderedDict([*model.named_modules()])"
@@ -246,7 +246,6 @@ def layer_activations_from_dataloader(layers,dataloader,model):
 
   #generate dataloader if image_path passed
   if isinstance(dataloader,str):
-    batch_size = 64
     kwargs = {'num_workers': 4, 'pin_memory': True, 'sampler':None} if 'cuda' in device.type else {}
     dataloader = DataLoader(rank_image_data(dataloader,
                                             class_folders=False,
@@ -270,7 +269,7 @@ def layer_activations_from_dataloader(layers,dataloader,model):
     with layer_saver(model, layers) as extractor:
       batch_layer_activations = extractor(images) #all features for layer and all images in batch
       for i in layers:
-        layer_activations[i].append(batch_layer_activations[i])
+        layer_activations[i].append(batch_layer_activations[i].detach().to('cpu'))
 
   for i in layers:     
     layer_activations[i] = torch.cat(layer_activations[i])

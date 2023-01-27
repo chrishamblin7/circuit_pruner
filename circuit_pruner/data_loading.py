@@ -1,6 +1,8 @@
 #functions for loading in image data
 from PIL import Image, ImageOps
 import os
+import sys
+from copy import deepcopy
 from subprocess import call
 import numpy as np
 from torchvision import datasets, transforms, utils
