@@ -188,7 +188,7 @@ def umap_fig_from_df(df,data_folder=None,layer=None,normed=False,norm_column = '
     if not show_colorscale:
         fig.update_traces(marker_showscale=False)
     
-    layout = go.Layout(   margin = dict(l=10,r=10,b=10,t=100),
+    layout = go.Layout(   margin = dict(l=10,r=10,b=10,t=10),
                           legend=dict(yanchor="top", xanchor="left", x=0.0),
                           paper_bgcolor='rgba(255,255,255,1)',
                           plot_bgcolor='rgba(255,255,255,1)',
