@@ -341,7 +341,7 @@ def full_app_from_df(df,data_folder,model,layer,unit,normed=False,norm_column='l
     app = JupyterDash(__name__)
 
     colors = {
-            'background': 'rgba(220,220,220,1)',
+            'background': 'rgba(255,255,255,1)',
             'text': '#111111'
             }
 
@@ -429,7 +429,7 @@ def full_app_from_df(df,data_folder,model,layer,unit,normed=False,norm_column='l
         img_path = data_folder+'/'+df_row['image']
         img_src = image_path_to_base64(img_path,layer,pos=position,rf_dict=rf_dict)
         act = round(df_row['activation'],3)
-        norm = round(df_row['norm'],3)
+        norm = round(df_row[norm_column],3)
 
         children = [
           html.Div(children=[

@@ -255,6 +255,66 @@ def direction_neuron(layer,
     return inner
 
 
+@wrap_objective()
+def dotdirection_neuron(layer, direction, batch=None, x=None, y=None):
+    """Visualize a direction
+
+    InceptionV1 example:
+    > direction = torch.rand(512, device=device)
+    > obj = objectives.direction(layer='mixed4c', direction=direction)
+
+    Args:
+        layer: Name of layer in model (string)
+        direction: Direction to visualize. torch.Tensor of shape (num_channels,)
+        batch: Batch number (int)
+
+    Returns:
+        Objective
+
+    """
+
+    @handle_batch(batch)
+    def inner(model):
+        layer_t = model(layer)
+        layer_t = _extract_act_pos(layer_t, x, y)
+        return -torch.tensordot(layer_t, 
+                                F.normalize(torch.tensor(direction.float()),
+                                dim=0), dims=([1],[0])).mean()
+
+    return inner
+
+
+
+@wrap_objective()
+def euclidean_neuron(layer, direction, batch=None, x=None, y=None):
+    """Visualize a direction
+
+    InceptionV1 example:
+    > direction = torch.rand(512, device=device)
+    > obj = objectives.direction(layer='mixed4c', direction=direction)
+
+    Args:
+        layer: Name of layer in model (string)
+        direction: Direction to visualize. torch.Tensor of shape (num_channels,)
+        batch: Batch number (int)
+
+    Returns:
+        Objective
+
+    """
+
+    @handle_batch(batch)
+    def inner(model):
+        layer_t = model(layer)
+        layer_t = _extract_act_pos(layer_t, x, y)
+        return torch.nn.MSELoss()(direction.reshape((1, -1, 1, 1)), layer_t).mean()
+
+    return inner
+
+
+
+
+
 def _torch_blur(tensor, out_c=3):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     depth = tensor.shape[1]

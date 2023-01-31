@@ -10,6 +10,12 @@ import os
 from torch.utils.data import DataLoader
 import pandas as pd
 from collections import OrderedDict
+from copy import deepcopy
+
+from sklearn.cluster import KMeans
+from scipy.spatial import distance_matrix
+import numpy as np
+from scipy.spatial.distance import cdist
 
 def umap_from_scores(scores,layers='all',norm_data=False,n_components=2):
   if layers=='all':
@@ -71,7 +77,7 @@ def gen_image_trajectory_map_df(data_folder,model,target_layer,unit,
   if isinstance(unit,int):
     unit_activations = target_layer_activations[:,unit]
   else:
-    unit_activations = torch.tensordot(target_layer_activations, torch.tensor(unit).float(), dims=([1],[0]))
+    unit_activations = torch.tensordot(target_layer_activations, torch.tensor(unit).to('cpu').float(), dims=([1],[0]))
 
 
   assert not (len(unit_activations.shape)>1 and (position is None))
@@ -90,6 +96,8 @@ def gen_image_trajectory_map_df(data_folder,model,target_layer,unit,
                 'layer':target_layer,
                 'position':position
                 })
+
+  #import pdb; pdb.set_trace()
 
   if scores is None:
     scores = []
@@ -135,16 +143,13 @@ def gen_image_trajectory_map_df(data_folder,model,target_layer,unit,
         if n_components == 3:
           row.append(data_map[i][2])
         big_list.append(row)
-        
+    print('computing umap projection') 
     umap_df = pd.DataFrame(big_list,columns=columns)
 
     return umap_df, scores
 
 
 
-####SPATIAL
-#rotation for mds plots
-from scipy.spatial.distance import cdist
 
 def cart2pol(x, y):
     rho = np.sqrt(x**2 + y**2)
@@ -206,3 +211,24 @@ def align_dataframes(in_df,anchor_df,angles_tested=64):
     in_df['x'],in_df['y'] = aligned_map[0],aligned_map[1]
     
     return in_df
+
+
+
+def random_spaced_indices_from_df(df,num):
+    '''
+    useful for adding images to trajectory map such that they are random and well spaced,
+    use as input to image_order argument in "full_app_from_df"
+    '''
+    pts2D = np.swapaxes(np.array([list(df['x']),list(df['y'])]),0,1)
+    kmeans = KMeans(n_clusters=num, random_state=0).fit(pts2D)
+    labels = kmeans.predict(pts2D)
+    cntr = kmeans.cluster_centers_
+    random_images = []
+    for i, c in enumerate(cntr):
+        lab = np.where(labels == i)[0]
+        pts = pts2D[lab]
+        d = distance_matrix(c[None, ...], pts)
+        idx1 = np.argmin(d, axis=1) + 1
+        idx2 = np.searchsorted(np.cumsum(labels == i), idx1)[0]
+        random_images.append(idx2)
+    return random_images

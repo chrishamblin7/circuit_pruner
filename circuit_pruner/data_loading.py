@@ -44,6 +44,7 @@ def single_image_loader(image_path, transform=default_preprocess, label_file_pat
 		if img_name in label_dict.keys():
 			target = label_dict[img_name]
 	else:
+		label_num = None
 		if label_file_path is not None:
 			label_file = open(label_file_path,'r')
 			label_list = [x.strip() for x in label_file.readlines()]

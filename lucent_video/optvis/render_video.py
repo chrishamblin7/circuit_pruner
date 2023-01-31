@@ -3,6 +3,7 @@ from lucent_video.optvis import render, param, transform, objectives
 from PIL import Image
 import torch
 from circuit_pruner.simple_api.mask import setup_net_for_mask
+from circuit_pruner.simple_api.util import convert_relu_layers
 from collections import OrderedDict
 import numpy as np
 
@@ -14,12 +15,15 @@ def render_accentuation(img_path,
                         saturation=8.,
                         device='cuda',
                         thresholds=range(41),
+						obj_f=None,
                         optimizer=None,  #lucent optimizer
                         transforms=None, #lucent transforms
                         show_image=True,
                         include_noise_init=True,
                         noise_std = .01,
                         ):
+  layer = layer.replace('.','_')
+  convert_relu_layers(model)
   mean = .5  #mean and standard deviation derived from synthetic images
   std = .08
   transformation = torchvision.transforms.Compose([torchvision.transforms.Resize((size,size)),torchvision.transforms.ToTensor()])
@@ -35,9 +39,10 @@ def render_accentuation(img_path,
   fourier_image = torch.cat((fourier_image,fourier_image),dim=0)
   fourier_image.requires_grad_(True)
   param_f = lambda: param.image(size,start_params=fourier_image,fft=True,device=device,batch=2)
-  obj_f = objectives.neuron
-  if hasattr(unit,'__len__'):
-    obj_f = objectives.dotdirection
+  if obj_f is None:
+    obj_f = objectives.neuron
+    if hasattr(unit,'__len__'):
+      obj_f = objectives.dotdirection_neuron
   obj = obj_f(layer,unit,batch=0) - obj_f(layer,unit,batch=1) 
   if include_noise_init:
     noise_param_f = lambda: param.image(size,device=device,sd=noise_std,magic=saturation)
