@@ -13,7 +13,7 @@ def render_accentuation(img_path,
                         model,
                         size=224,
                         saturation=8.,
-						device = None
+						device = None,
                         thresholds=range(41),
 						obj_f=None,
                         optimizer=None,  #lucent optimizer
