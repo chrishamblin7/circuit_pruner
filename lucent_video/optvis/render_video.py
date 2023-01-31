@@ -13,7 +13,7 @@ def render_accentuation(img_path,
                         model,
                         size=224,
                         saturation=8.,
-                        device='cuda',
+						device = None
                         thresholds=range(41),
 						obj_f=None,
                         optimizer=None,  #lucent optimizer
@@ -22,6 +22,7 @@ def render_accentuation(img_path,
                         include_noise_init=True,
                         noise_std = .01,
                         ):
+  if device is None: device = next(model.parameters()).device
   layer = layer.replace('.','_')
   convert_relu_layers(model)
   mean = .5  #mean and standard deviation derived from synthetic images
