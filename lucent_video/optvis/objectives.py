@@ -276,7 +276,10 @@ def dotdirection_neuron(layer, direction, batch=None, x=None, y=None):
     @handle_batch(batch)
     def inner(model):
         layer_t = model(layer)
-        layer_t = _extract_act_pos(layer_t, x, y)
+        try:
+            layer_t = _extract_act_pos(layer_t, x, y)
+        except:
+            print('cant extract position, assuming this is a linear layer')
         return -torch.tensordot(layer_t, 
                                 F.normalize(torch.tensor(direction.float()),
                                 dim=0), dims=([1],[0])).mean()
